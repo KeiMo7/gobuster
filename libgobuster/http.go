@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // HTTPHeader holds a single key value pair of a HTTP header
@@ -32,6 +35,7 @@ type HTTPClient struct {
 	method                string
 	host                  string
 	logger                *Logger
+	rateLimiter           *RateLimitGroup
 }
 
 // RequestOptions is used to pass options to a single individual request
@@ -125,13 +129,23 @@ func NewHTTPClient(opt *HTTPOptions, logger *Logger) (*HTTPClient, error) {
 		}
 	}
 	client.logger = logger
+	client.rateLimiter = opt.RateLimiter
 	return &client, nil
 }
+
+const (
+	// rateRetryMaxAttempts is the total number of attempts for a request
+	// that gets throttled (429/503) or whose connection is reset. Only
+	// active when a rate limiter is configured.
+	rateRetryMaxAttempts = 4
+	rateRetryBaseBackoff = 500 * time.Millisecond
+	rateRetryMaxBackoff  = 5 * time.Second
+)
 
 // Request makes a http request and returns the status, the content length, the headers, the body and an error
 // if you want the body returned set the corresponding property inside RequestOptions
 func (client *HTTPClient) Request(ctx context.Context, fullURL url.URL, opts RequestOptions) (int, int64, http.Header, []byte, error) {
-	resp, err := client.makeRequest(ctx, fullURL, opts)
+	resp, err := client.makeRequestThrottled(ctx, fullURL, opts)
 	if err != nil {
 		// ignore context canceled errors
 		if errors.Is(ctx.Err(), context.Canceled) {
@@ -159,6 +173,85 @@ func (client *HTTPClient) Request(ctx context.Context, fullURL url.URL, opts Req
 	}
 
 	return resp.StatusCode, length, resp.Header, body, nil
+}
+
+// isThrottledStatus reports whether the status code signals server side
+// rate limiting
+func isThrottledStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode == http.StatusServiceUnavailable
+}
+
+// isConnectionReset reports whether the error is a connection reset by the peer
+func isConnectionReset(err error) bool {
+	return errors.Is(err, syscall.ECONNRESET)
+}
+
+// sleepContext sleeps for d or returns early when the context is canceled
+func sleepContext(ctx context.Context, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+// makeRequestThrottled wraps makeRequest with rate limiting, backoff based
+// requeuing on throttling responses / connection resets and adaptive
+// feedback. Without a configured rate limiter it behaves exactly like
+// makeRequest.
+func (client *HTTPClient) makeRequestThrottled(ctx context.Context, fullURL url.URL, opts RequestOptions) (*http.Response, error) {
+	limiter := client.rateLimiter
+	if limiter == nil {
+		return client.makeRequest(ctx, fullURL, opts)
+	}
+
+	target := fullURL.Host
+	backoff := rateRetryBaseBackoff
+
+	for attempt := 1; ; attempt++ {
+		if err := limiter.Wait(ctx, target); err != nil {
+			// context canceled while waiting for a token
+			return nil, err
+		}
+
+		resp, err := client.makeRequest(ctx, fullURL, opts)
+		if err != nil {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil, err
+			}
+			// a connection reset is requeued with backoff instead of being
+			// reported as a miss right away
+			if isConnectionReset(err) && attempt < rateRetryMaxAttempts {
+				limiter.Feedback(target, true)
+				client.logger.Debugf("connection reset by %s, requeuing request after %s", target, backoff)
+				sleepContext(ctx, backoff)
+				backoff = min(backoff*2, rateRetryMaxBackoff)
+				continue
+			}
+			return nil, err
+		}
+
+		if isThrottledStatus(resp.StatusCode) && attempt < rateRetryMaxAttempts {
+			limiter.Feedback(target, true)
+			wait := backoff
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if seconds, serr := strconv.Atoi(strings.TrimSpace(ra)); serr == nil && seconds > 0 {
+					wait = time.Duration(seconds) * time.Second
+				}
+			}
+			// drain and close so the connection can be reused
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			client.logger.Debugf("target %s throttled us (status %d), requeuing request after %s", target, resp.StatusCode, wait)
+			sleepContext(ctx, wait)
+			backoff = min(backoff*2, rateRetryMaxBackoff)
+			continue
+		}
+
+		limiter.Feedback(target, false)
+		return resp, nil
+	}
 }
 
 func (client *HTTPClient) makeRequest(ctx context.Context, fullURL url.URL, opts RequestOptions) (*http.Response, error) {

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"runtime/debug"
 
+	gocli "github.com/OJ/gobuster/v3/cli"
 	"github.com/OJ/gobuster/v3/cli/dir"
 	"github.com/OJ/gobuster/v3/cli/dns"
 	"github.com/OJ/gobuster/v3/cli/fuzz"
@@ -58,6 +60,12 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Fatal(err)
+		var exitErr *gocli.ExitError
+		if errors.As(err, &exitErr) {
+			// hits were found, exit silently with the dedicated code
+			os.Exit(exitErr.Code)
+		}
+		log.Print(err)
+		os.Exit(gocli.ExitCodeError)
 	}
 }

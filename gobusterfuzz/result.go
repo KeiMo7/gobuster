@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -17,9 +18,21 @@ var (
 type Result struct {
 	Word       string
 	Path       string
+	Target     string
 	StatusCode int
 	Size       int64
 	Header     http.Header
+}
+
+// ResultFields extracts the fields for the structured output
+func (r Result) ResultFields() libgobuster.StructuredFields {
+	return libgobuster.StructuredFields{
+		Target:     r.Target,
+		Path:       r.Path,
+		StatusCode: r.StatusCode,
+		Length:     r.Size,
+		Redirect:   r.Header.Get("Location"),
+	}
 }
 
 // ResultToString converts the Result to its textual representation

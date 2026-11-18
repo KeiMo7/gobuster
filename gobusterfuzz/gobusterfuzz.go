@@ -59,6 +59,7 @@ func New(globalopts *libgobuster.Options, opts *OptionsFuzz, logger *libgobuster
 		RetryOnTimeout:  opts.RetryOnTimeout,
 		RetryAttempts:   opts.RetryAttempts,
 		TLSCertificate:  opts.TLSCertificate,
+		RateLimiter:     globalopts.RateLimiter,
 	}
 
 	httpOpts := libgobuster.HTTPOptions{
@@ -201,6 +202,7 @@ func (d *GobusterFuzz) ProcessWord(ctx context.Context, word string, progress *l
 		if resultStatus {
 			r := Result{
 				Path:       url.String(),
+				Target:     d.options.URL.String(),
 				StatusCode: statusCode,
 				Size:       size,
 				Word:       word,

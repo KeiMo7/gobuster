@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -12,8 +13,19 @@ var green = color.New(color.FgGreen).FprintfFunc()
 // Result represents a single result
 type Result struct {
 	Filename     string
+	Target       string
 	Size         int64
 	ErrorMessage string
+}
+
+// ResultFields extracts the fields for the structured output
+func (r Result) ResultFields() libgobuster.StructuredFields {
+	return libgobuster.StructuredFields{
+		Target:     r.Target,
+		Path:       r.Filename,
+		StatusCode: -1,
+		Length:     r.Size,
+	}
 }
 
 // ResultToString converts the Result to its textual representation

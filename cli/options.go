@@ -226,6 +226,12 @@ func GlobalOptions() []cli.Flag {
 		&cli.StringFlag{Name: "discover-pattern", Aliases: []string{"pd"}, Usage: "File containing replacement patterns applied to successful guesses"},
 		&cli.BoolFlag{Name: "no-color", Aliases: []string{"nc"}, Value: false, Usage: "Disable color output"},
 		&cli.BoolFlag{Name: "debug", Value: false, Usage: "enable debug output"},
+		&cli.StringFlag{Name: "output-structured", Usage: "Path to a structured JSONL output file. Results are appended so multiple runs merge into one file"},
+		&cli.Float64Flag{Name: "rate-limit", Value: 0, Usage: "Global request rate limit in requests/second (0 = unlimited). Excess requests are queued, not dropped"},
+		&cli.Float64Flag{Name: "rate-limit-per-target", Value: 0, Usage: "Per-target request rate limit in requests/second (0 = unlimited). The stricter of this and rate-limit applies"},
+		&cli.StringFlag{Name: "rate-control-file", Usage: "Path to a JSON file ({\"global_rps\": N, \"per_target_rps\": N}) that is watched to adjust rate limits at runtime without restarting"},
+		&cli.BoolFlag{Name: "rate-adaptive", Value: false, Usage: "Automatically halve the rate on throttling responses (429/503/connection reset) and slowly increase it again after recovery"},
+		&cli.Float64Flag{Name: "rate-min", Value: 1, Usage: "Lower bound in requests/second for adaptive rate decreases"},
 	}
 }
 
@@ -297,6 +303,27 @@ func ParseGlobalOptions(c *cli.Context) (libgobuster.Options, error) {
 	}
 
 	opts.Debug = c.Bool("debug")
+
+	opts.OutputStructuredFilename = c.String("output-structured")
+	opts.RateLimit = c.Float64("rate-limit")
+	opts.RateLimitPerTarget = c.Float64("rate-limit-per-target")
+	opts.RateControlFile = c.String("rate-control-file")
+	opts.RateAdaptive = c.Bool("rate-adaptive")
+	opts.RateMin = c.Float64("rate-min")
+
+	if opts.RateLimit < 0 || opts.RateLimitPerTarget < 0 || opts.RateMin <= 0 {
+		return opts, errors.New("rate limits must be >= 0 and rate-min must be > 0")
+	}
+	if opts.RateControlFile != "" && opts.RateLimit == 0 && opts.RateLimitPerTarget == 0 {
+		return opts, errors.New("rate-control-file requires --rate-limit or --rate-limit-per-target to be set")
+	}
+
+	rateLimiter, err := libgobuster.NewRateLimitGroup(opts.RateLimit, opts.RateLimitPerTarget, opts.RateMin, opts.RateAdaptive)
+	if err != nil {
+		return opts, err
+	}
+	opts.RateLimiter = rateLimiter
+
 	return opts, nil
 }
 

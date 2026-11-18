@@ -75,6 +75,7 @@ func New(globalopts *libgobuster.Options, opts *OptionsDir, logger *libgobuster.
 		TLSCertificate:   opts.TLSCertificate,
 		TLSRenegotiation: opts.TLSRenegotiation,
 		LocalAddr:        opts.LocalAddr,
+		RateLimiter:      globalopts.RateLimiter,
 	}
 
 	httpOpts := libgobuster.HTTPOptions{
@@ -305,6 +306,7 @@ func (d *GobusterDir) ProcessWord(ctx context.Context, word string, progress *li
 
 			r := Result{
 				Path:       path,
+				Target:     d.options.URL.String(),
 				Header:     header,
 				StatusCode: -1,
 				Size:       -1,

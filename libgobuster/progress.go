@@ -24,6 +24,7 @@ type Progress struct {
 	ResultChan            chan Result
 	ErrorChan             chan error
 	MessageChan           chan Message
+	StructuredChan        chan StructuredResult
 }
 
 func NewProgress() *Progress {
@@ -34,6 +35,7 @@ func NewProgress() *Progress {
 	p.ResultChan = make(chan Result)
 	p.ErrorChan = make(chan error)
 	p.MessageChan = make(chan Message)
+	p.StructuredChan = make(chan StructuredResult)
 	return &p
 }
 

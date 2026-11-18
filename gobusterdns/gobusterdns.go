@@ -137,6 +137,7 @@ func (d *GobusterDNS) ProcessWord(ctx context.Context, word string, progress *li
 	if !d.isWildcard || !d.wildcardIps.ContainsAny(ips) {
 		result := Result{
 			Subdomain: strings.TrimSuffix(subdomain, "."),
+			Target:    d.options.Domain,
 		}
 
 		result.IPs = ips

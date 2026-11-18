@@ -50,6 +50,7 @@ func New(globalopts *libgobuster.Options, opts *OptionsGCS, logger *libgobuster.
 		RetryOnTimeout:  opts.RetryOnTimeout,
 		RetryAttempts:   opts.RetryAttempts,
 		TLSCertificate:  opts.TLSCertificate,
+		RateLimiter:     globalopts.RateLimiter,
 	}
 
 	httpOpts := libgobuster.HTTPOptions{

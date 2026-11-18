@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -14,8 +15,19 @@ var green = color.New(color.FgGreen).FprintfFunc()
 // Result represents a single result
 type Result struct {
 	Subdomain string
+	Target    string
 	IPs       []netip.Addr
 	CNAME     string
+}
+
+// ResultFields extracts the fields for the structured output
+func (r Result) ResultFields() libgobuster.StructuredFields {
+	return libgobuster.StructuredFields{
+		Target:     r.Target,
+		Path:       r.Subdomain,
+		StatusCode: -1,
+		Length:     -1,
+	}
 }
 
 // ResultToString converts the Result to its textual representation

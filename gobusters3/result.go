@@ -3,6 +3,7 @@ package gobusters3
 import (
 	"bytes"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -30,4 +31,14 @@ func (r Result) ResultToString() (string, error) {
 
 	str := buf.String()
 	return str, nil
+}
+
+// ResultFields extracts the fields for the structured output
+func (r Result) ResultFields() libgobuster.StructuredFields {
+	return libgobuster.StructuredFields{
+		Target:     "https://s3.amazonaws.com",
+		Path:       r.BucketName,
+		StatusCode: -1,
+		Length:     -1,
+	}
 }

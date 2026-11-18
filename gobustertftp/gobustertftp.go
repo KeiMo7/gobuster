@@ -73,6 +73,7 @@ func (d *GobusterTFTP) ProcessWord(_ context.Context, word string, progress *lib
 	}
 	result := Result{
 		Filename: word,
+		Target:   d.options.Server,
 	}
 	wt2, ok := wt.(tftp.IncomingTransfer)
 	if !ok {

@@ -69,7 +69,9 @@ func (g *Gobuster) worker(ctx context.Context, guessChan <-chan *Guess, successC
 		case guess := <-guessChan:
 
 			// Mode-specific processing
+			started := time.Now()
 			res, err := g.plugin.ProcessWord(ctx, guess.word, g.Progress)
+			elapsed := time.Since(started)
 			if err != nil {
 				// do not exit and continue
 				g.Progress.ErrorChan <- fmt.Errorf("error on word %s: %w", guess.word, err)
@@ -77,6 +79,22 @@ func (g *Gobuster) worker(ctx context.Context, guessChan <-chan *Guess, successC
 
 			if res != nil {
 				g.Progress.ResultChan <- res
+
+				if g.Opts.OutputStructuredFilename != "" {
+					if fields, ok := res.(ResultFieldsProvider); ok {
+						f := fields.ResultFields()
+						g.Progress.StructuredChan <- StructuredResult{
+							Timestamp:  time.Now().Format(time.RFC3339Nano),
+							Plugin:     g.plugin.Name(),
+							Target:     f.Target,
+							Path:       f.Path,
+							StatusCode: f.StatusCode,
+							Length:     f.Length,
+							Redirect:   f.Redirect,
+							DurationMs: elapsed.Milliseconds(),
+						}
+					}
+				}
 
 				select {
 				case <-ctx.Done():
@@ -227,6 +245,7 @@ func (g *Gobuster) Run(ctx context.Context) error {
 	defer close(g.Progress.ResultChan)
 	defer close(g.Progress.ErrorChan)
 	defer close(g.Progress.MessageChan)
+	defer close(g.Progress.StructuredChan)
 
 	if err := g.plugin.PreRun(ctx, g.Progress); err != nil {
 		return err

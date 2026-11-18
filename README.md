@@ -15,6 +15,7 @@
 - 🛡️ **Security Focused**: Built for penetration testing and security assessments
 - 🐳 **Docker Support**: Available as a Docker container
 - 🔧 **Extensible**: Pattern-based scanning and custom wordlists
+- 📊 **Structured Output & Rate Control**: Append-only JSONL results with new/known hit classification, global and per-target rate limits, runtime rate adjustment and adaptive backoff — see [docs/structured-output-and-rate-limiting.md](docs/structured-output-and-rate-limiting.md)
 
 ## 🎯 What Can Gobuster Do?
 

@@ -52,6 +52,7 @@ func New(globalopts *libgobuster.Options, opts *OptionsVhost, logger *libgobuste
 		RetryOnTimeout:  opts.RetryOnTimeout,
 		RetryAttempts:   opts.RetryAttempts,
 		TLSCertificate:  opts.TLSCertificate,
+		RateLimiter:     globalopts.RateLimiter,
 	}
 
 	httpOpts := libgobuster.HTTPOptions{
@@ -203,6 +204,7 @@ func (v *GobusterVhost) ProcessWord(ctx context.Context, word string, progress *
 	if found && !v.options.ExcludeLengthParsed.Contains(int(size)-hostnameLength) && !v.options.ExcludeStatusParsed.Contains(statusCode) {
 		r := Result{
 			Vhost:      subdomain,
+			Target:     v.options.URL.String(),
 			StatusCode: statusCode,
 			Size:       size,
 			Header:     header,
