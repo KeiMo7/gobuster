@@ -73,6 +73,11 @@ func (s *GobusterS3) Name() string {
 	return "S3 bucket enumeration"
 }
 
+// SARIFTarget returns the stable target identity used by SARIF fingerprints.
+func (s *GobusterS3) SARIFTarget() string {
+	return "s3.amazonaws.com"
+}
+
 // PreRun is the pre run implementation of GobusterS3
 func (s *GobusterS3) PreRun(_ context.Context, _ *libgobuster.Progress) error {
 	return nil

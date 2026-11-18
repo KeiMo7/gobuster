@@ -219,6 +219,7 @@ func GlobalOptions() []cli.Flag {
 		&cli.IntFlag{Name: "threads", Aliases: []string{"t"}, Value: 10, Usage: "Number of concurrent threads"},
 		&cli.IntFlag{Name: "wordlist-offset", Aliases: []string{"wo"}, Value: 0, Usage: "Resume from a given position in the wordlist"},
 		&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Usage: "Output file to write results to (defaults to stdout)"},
+		&cli.StringFlag{Name: "sarif", Aliases: []string{"sarif-output", "sarif-file"}, Usage: "Write SARIF 2.1.0 results to the specified file"},
 		&cli.BoolFlag{Name: "quiet", Aliases: []string{"q"}, Value: false, Usage: "Don't print the banner and other noise"},
 		&cli.BoolFlag{Name: "no-progress", Aliases: []string{"np"}, Value: false, Usage: "Don't display progress"},
 		&cli.BoolFlag{Name: "no-error", Aliases: []string{"ne"}, Value: false, Usage: "Don't display errors"},
@@ -249,6 +250,7 @@ func ParseGlobalOptions(c *cli.Context) (libgobuster.Options, error) {
 	}
 
 	opts.OutputFilename = c.String("output")
+	opts.SARIFOutput = c.String("sarif")
 	opts.Quiet = c.Bool("quiet")
 	opts.NoProgress = c.Bool("no-progress")
 	opts.NoError = c.Bool("no-error")

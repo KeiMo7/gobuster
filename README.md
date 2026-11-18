@@ -326,6 +326,19 @@ gobuster dir -u https://example.com -w wordlist.txt -o results.txt
 gobuster dir -u https://example.com -w wordlist.txt -q
 ```
 
+#### SARIF 2.1.0 output
+
+Use `--sarif` to write a SARIF 2.1.0 report for security dashboards while keeping the normal terminal and `-o` output unchanged:
+
+```bash
+gobuster dir -u https://example.com -w wordlist.txt --sarif gobuster.sarif
+gobuster dns -do example.com -w subdomains.txt --sarif gobuster-dns.sarif
+```
+
+Each finding is a separate SARIF `result`. Artifact locations point at the relative wordlist path and the exact 1-based line containing the matching word; the discovered URL or subdomain is included as a logical location. Rule IDs use the stable `gobuster/...` namespace, and severity is derived from the central rule table in `libgobuster/sarif.go`.
+
+Re-running a scan into the same SARIF file compares stable `partialFingerprints` and marks existing findings as `unchanged` and new findings as `new`. Reports are written to a temporary file and atomically published only after a self-check, so an interrupted scan cannot leave a partial JSON document.
+
 ## 📚 Additional Resources
 
 ### Recommended Wordlists

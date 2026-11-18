@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -44,4 +45,34 @@ func (r Result) ResultToString() (string, error) {
 
 	s := buf.String()
 	return s, nil
+}
+
+// ToSARIF converts the result into stable SARIF data.
+func (r Result) ToSARIF() libgobuster.SARIFFinding {
+	properties := map[string]string{}
+	if len(r.IPs) > 0 {
+		ips := make([]string, len(r.IPs))
+		for i := range r.IPs {
+			ips[i] = r.IPs[i].String()
+		}
+		properties["ips"] = strings.Join(ips, ",")
+	}
+	if r.CNAME != "" {
+		properties["cname"] = r.CNAME
+	}
+
+	message := fmt.Sprintf("DNS subdomain discovered: %s", r.Subdomain)
+	if len(r.IPs) > 0 {
+		message = fmt.Sprintf("%s (%s)", message, properties["ips"])
+	}
+	if r.CNAME != "" {
+		message = fmt.Sprintf("%s (CNAME %s)", message, r.CNAME)
+	}
+
+	return libgobuster.SARIFFinding{
+		RuleID:          libgobuster.SARIFDNSSubdomainRuleID,
+		Message:         message,
+		LogicalLocation: r.Subdomain,
+		Properties:      properties,
+	}
 }

@@ -34,6 +34,7 @@ type Gobuster struct {
 
 type Guess struct {
 	word              string
+	line              int
 	discoverOnSuccess bool
 }
 
@@ -76,6 +77,15 @@ func (g *Gobuster) worker(ctx context.Context, guessChan <-chan *Guess, successC
 			}
 
 			if res != nil {
+				if g.Opts.SARIFOutput != "" {
+					if _, ok := res.(SARIFResult); ok {
+						res = &sarifLocatedResult{
+							Result: res,
+							word:   guess.word,
+							line:   guess.line,
+						}
+					}
+				}
 				g.Progress.ResultChan <- res
 
 				select {
@@ -96,9 +106,9 @@ func (g *Gobuster) worker(ctx context.Context, guessChan <-chan *Guess, successC
 	}
 }
 
-func feed(ctx context.Context, guessChan chan<- *Guess, words []string, discoverOnSuccess bool) {
+func feed(ctx context.Context, guessChan chan<- *Guess, words []string, discoverOnSuccess bool, line int) {
 	for _, w := range words {
-		guess := &Guess{word: w, discoverOnSuccess: discoverOnSuccess}
+		guess := &Guess{word: w, line: line, discoverOnSuccess: discoverOnSuccess}
 		// Prioritize stopping when the context is done
 		select {
 		case <-ctx.Done():
@@ -114,16 +124,18 @@ func feed(ctx context.Context, guessChan chan<- *Guess, words []string, discover
 	}
 }
 
-func (g *Gobuster) feeder(ctx context.Context, guessChan chan<- *Guess, words []string, discoverOnSuccess bool, wg *sync.WaitGroup) {
+func (g *Gobuster) feeder(ctx context.Context, guessChan chan<- *Guess, words []string, discoverOnSuccess bool, line int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	feed(ctx, guessChan, words, discoverOnSuccess)
+	feed(ctx, guessChan, words, discoverOnSuccess, line)
 }
 
 func (g *Gobuster) feedWordlist(ctx context.Context, guessChan chan<- *Guess, wordlist *Wordlist, wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	line := g.Opts.WordlistOffset
 	for wordlist.scanner.Scan() {
+		line++
 		// Prioritize stopping when the context is done
 		select {
 		case <-ctx.Done():
@@ -148,17 +160,17 @@ func (g *Gobuster) feedWordlist(ctx context.Context, guessChan chan<- *Guess, wo
 
 		if len(g.Opts.Patterns) > 0 {
 			for _, w := range g.processPatterns(word) {
-				guess := &Guess{word: w, discoverOnSuccess: true}
+				guess := &Guess{word: w, line: line, discoverOnSuccess: true}
 				select {
 				case <-ctx.Done():
 					return
 				case guessChan <- guess:
 				}
 
-				feed(ctx, guessChan, g.plugin.AdditionalWords(w), true)
+				feed(ctx, guessChan, g.plugin.AdditionalWords(w), true, line)
 			}
 		} else {
-			guess := &Guess{word: word, discoverOnSuccess: true}
+			guess := &Guess{word: word, line: line, discoverOnSuccess: true}
 
 			select {
 			case <-ctx.Done():
@@ -166,7 +178,7 @@ func (g *Gobuster) feedWordlist(ctx context.Context, guessChan chan<- *Guess, wo
 			case guessChan <- guess:
 			}
 
-			feed(ctx, guessChan, g.plugin.AdditionalWords(word), true)
+			feed(ctx, guessChan, g.plugin.AdditionalWords(word), true, line)
 		}
 	}
 }
@@ -286,14 +298,14 @@ ListenForMore:
 				if len(discoverWords) > 0 {
 					g.Progress.IncrementTotalRequests(len(discoverWords))
 					feederGroup.Add(1)
-					go g.feeder(feederCtx, guessChan, discoverWords, false, &feederGroup)
+					go g.feeder(feederCtx, guessChan, discoverWords, false, successGuess.line, &feederGroup)
 				}
 
 				patternDiscoverWords := g.processDiscoverPatterns(successGuess.word)
 				if len(patternDiscoverWords) > 0 {
 					g.Progress.IncrementTotalRequests(len(patternDiscoverWords))
 					feederGroup.Add(1)
-					go g.feeder(feederCtx, guessChan, patternDiscoverWords, false, &feederGroup)
+					go g.feeder(feederCtx, guessChan, patternDiscoverWords, false, successGuess.line, &feederGroup)
 				}
 			}
 		case <-time.After(200 * time.Millisecond):

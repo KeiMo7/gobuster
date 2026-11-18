@@ -76,6 +76,11 @@ func (d *GobusterDNS) Name() string {
 	return "DNS enumeration"
 }
 
+// SARIFTarget returns the stable target identity used by SARIF fingerprints.
+func (d *GobusterDNS) SARIFTarget() string {
+	return d.options.Domain
+}
+
 // PreRun is the pre run implementation of gobusterdns
 func (d *GobusterDNS) PreRun(ctx context.Context, progress *libgobuster.Progress) error {
 	// Resolve a subdomain that probably shouldn't exist

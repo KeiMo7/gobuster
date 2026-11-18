@@ -102,6 +102,11 @@ func (d *GobusterDir) Name() string {
 	return "directory enumeration"
 }
 
+// SARIFTarget returns the stable target identity used by SARIF fingerprints.
+func (d *GobusterDir) SARIFTarget() string {
+	return d.options.URL.String()
+}
+
 // PreRun is the pre run implementation of gobusterdir
 func (d *GobusterDir) PreRun(ctx context.Context, pr *libgobuster.Progress) error {
 	// add trailing slash

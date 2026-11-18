@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -33,4 +34,22 @@ func (r Result) ResultToString() (string, error) {
 
 	s := buf.String()
 	return s, nil
+}
+
+// ToSARIF converts the result into stable SARIF data.
+func (r Result) ToSARIF() libgobuster.SARIFFinding {
+	properties := map[string]string{}
+	if r.Size > 0 {
+		properties["size"] = fmt.Sprintf("%d", r.Size)
+	}
+	if r.ErrorMessage != "" {
+		properties["error"] = r.ErrorMessage
+	}
+
+	return libgobuster.SARIFFinding{
+		RuleID:          libgobuster.SARIFTFTPSuccessRuleID,
+		Message:         fmt.Sprintf("TFTP file discovered: %s", r.Filename),
+		LogicalLocation: r.Filename,
+		Properties:      properties,
+	}
 }

@@ -85,6 +85,11 @@ func (d *GobusterFuzz) Name() string {
 	return "fuzzing"
 }
 
+// SARIFTarget returns the stable target identity used by SARIF fingerprints.
+func (d *GobusterFuzz) SARIFTarget() string {
+	return d.options.URL.String()
+}
+
 // PreRun is the pre run implementation of gobusterfuzz
 func (d *GobusterFuzz) PreRun(_ context.Context, _ *libgobuster.Progress) error {
 	return nil

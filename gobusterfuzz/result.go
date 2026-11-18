@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -38,4 +39,23 @@ func (r Result) ResultToString() (string, error) {
 	}
 	s := buf.String()
 	return s, nil
+}
+
+// ToSARIF converts the result into stable SARIF data.
+func (r Result) ToSARIF() libgobuster.SARIFFinding {
+	properties := map[string]string{
+		"statusCode": fmt.Sprintf("%d", r.StatusCode),
+		"size":       fmt.Sprintf("%d", r.Size),
+		"word":       r.Word,
+	}
+	if location := r.Header.Get("Location"); location != "" {
+		properties["location"] = location
+	}
+
+	return libgobuster.SARIFFinding{
+		RuleID:          libgobuster.SARIFRuleForStatus(r.StatusCode),
+		Message:         fmt.Sprintf("HTTP fuzzing response discovered: %s (status %d, size %d)", r.Path, r.StatusCode, r.Size),
+		LogicalLocation: r.Path,
+		Properties:      properties,
+	}
 }

@@ -15,6 +15,7 @@ type Options struct {
 	Patterns            []string
 	DiscoverPatterns    []string
 	OutputFilename      string
+	SARIFOutput         string
 	NoProgress          bool
 	NoError             bool
 	Quiet               bool

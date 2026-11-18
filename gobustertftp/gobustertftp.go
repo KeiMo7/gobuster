@@ -42,6 +42,11 @@ func (d *GobusterTFTP) Name() string {
 	return "TFTP enumeration"
 }
 
+// SARIFTarget returns the stable target identity used by SARIF fingerprints.
+func (d *GobusterTFTP) SARIFTarget() string {
+	return d.options.Server
+}
+
 // PreRun is the pre run implementation of gobustertftp
 func (d *GobusterTFTP) PreRun(_ context.Context, _ *libgobuster.Progress) error {
 	_, err := tftp.NewClient(d.options.Server)

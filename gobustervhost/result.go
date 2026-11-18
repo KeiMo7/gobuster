@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -47,4 +48,23 @@ func (r Result) ResultToString() (string, error) {
 	}
 
 	return fmt.Sprintf("%s %s [Size: %d]%s\n", r.Vhost, statusCode, r.Size, locationString), nil
+}
+
+// ToSARIF converts the result into stable SARIF data.
+func (r Result) ToSARIF() libgobuster.SARIFFinding {
+	ruleID := libgobuster.SARIFRuleForStatus(r.StatusCode)
+	properties := map[string]string{
+		"statusCode": fmt.Sprintf("%d", r.StatusCode),
+		"size":       fmt.Sprintf("%d", r.Size),
+	}
+	if location := r.Header.Get("Location"); location != "" {
+		properties["location"] = location
+	}
+
+	return libgobuster.SARIFFinding{
+		RuleID:          ruleID,
+		Message:         fmt.Sprintf("VHOST discovered: %s (status %d, size %d)", r.Vhost, r.StatusCode, r.Size),
+		LogicalLocation: r.Vhost,
+		Properties:      properties,
+	}
 }

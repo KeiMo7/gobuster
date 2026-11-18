@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -66,4 +68,47 @@ func (r Result) ResultToString() (string, error) {
 	s := buf.String()
 
 	return s, nil
+}
+
+// ToSARIF converts the result into stable SARIF data.
+func (r Result) ToSARIF() libgobuster.SARIFFinding {
+	path := strings.TrimSpace(r.Path)
+	ruleID := libgobuster.SARIFRuleForStatus(r.StatusCode)
+	properties := map[string]string{}
+	if r.StatusCode >= 0 {
+		properties["statusCode"] = fmt.Sprintf("%d", r.StatusCode)
+	}
+	if r.Size >= 0 {
+		properties["size"] = fmt.Sprintf("%d", r.Size)
+	}
+	if location := r.Header.Get("Location"); location != "" {
+		properties["location"] = location
+	}
+
+	message := fmt.Sprintf("HTTP resource discovered: %s", path)
+	switch ruleID {
+	case libgobuster.SARIFHTTPRedirectRuleID:
+		message = fmt.Sprintf("HTTP redirect discovered: %s", path)
+	case libgobuster.SARIFHTTPAccessRuleID:
+		message = fmt.Sprintf("Access-controlled HTTP resource discovered: %s", path)
+	case libgobuster.SARIFHTTPServerErrorRuleID:
+		message = fmt.Sprintf("HTTP server error discovered: %s", path)
+	case libgobuster.SARIFHTTPSuccessRuleID:
+		message = fmt.Sprintf("HTTP resource discovered: %s", path)
+	case libgobuster.SARIFHTTPOtherRuleID:
+		message = fmt.Sprintf("HTTP response discovered: %s", path)
+	}
+	if r.StatusCode >= 0 {
+		message = fmt.Sprintf("%s (status %d)", message, r.StatusCode)
+	}
+	if r.Size >= 0 {
+		message = fmt.Sprintf("%s (size %d)", message, r.Size)
+	}
+
+	return libgobuster.SARIFFinding{
+		RuleID:          ruleID,
+		Message:         message,
+		LogicalLocation: path,
+		Properties:      properties,
+	}
 }

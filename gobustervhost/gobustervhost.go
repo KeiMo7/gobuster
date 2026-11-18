@@ -78,6 +78,11 @@ func (v *GobusterVhost) Name() string {
 	return "VHOST enumeration"
 }
 
+// SARIFTarget returns the stable target identity used by SARIF fingerprints.
+func (v *GobusterVhost) SARIFTarget() string {
+	return v.options.URL.String()
+}
+
 // PreRun is the pre run implementation of gobusterdir
 func (v *GobusterVhost) PreRun(ctx context.Context, _ *libgobuster.Progress) error {
 	// add trailing slash

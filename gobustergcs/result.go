@@ -3,6 +3,7 @@ package gobustergcs
 import (
 	"bytes"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -30,4 +31,18 @@ func (r Result) ResultToString() (string, error) {
 
 	str := buf.String()
 	return str, nil
+}
+
+// ToSARIF converts the result into stable SARIF data.
+func (r Result) ToSARIF() libgobuster.SARIFFinding {
+	properties := map[string]string{"bucket": r.BucketName}
+	if r.Status != "" {
+		properties["status"] = r.Status
+	}
+	return libgobuster.SARIFFinding{
+		RuleID:          libgobuster.SARIFGCSBucketRuleID,
+		Message:         "GCS bucket discovered: " + r.BucketName,
+		LogicalLocation: r.BucketName,
+		Properties:      properties,
+	}
 }

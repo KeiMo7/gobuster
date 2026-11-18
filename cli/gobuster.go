@@ -20,7 +20,7 @@ const (
 
 // resultWorker outputs the results as they come in. This needs to be a range and should not handle
 // the context so the channel always has a receiver and libgobuster will not block.
-func resultWorker(g *libgobuster.Gobuster, filename string, wg *sync.WaitGroup) {
+func resultWorker(g *libgobuster.Gobuster, filename string, sarifWriter *libgobuster.SARIFWriter, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	var f *os.File
@@ -34,6 +34,9 @@ func resultWorker(g *libgobuster.Gobuster, filename string, wg *sync.WaitGroup) 
 	}
 
 	for r := range g.Progress.ResultChan {
+		if sarifWriter != nil {
+			sarifWriter.WriteResult(r)
+		}
 		s, err := r.ResultToString()
 		if err != nil {
 			g.Logger.Fatal(err)
@@ -180,13 +183,29 @@ func Gobuster(ctx context.Context, opts *libgobuster.Options, plugin libgobuster
 		opts.NoProgress = true
 	}
 
+	var sarifWriter *libgobuster.SARIFWriter
+	if opts.SARIFOutput != "" {
+		target := plugin.Name()
+		if provider, ok := plugin.(libgobuster.SARIFTargetProvider); ok && provider.SARIFTarget() != "" {
+			target = provider.SARIFTarget()
+		}
+		sarifWriter, err = libgobuster.NewSARIFWriter(opts.SARIFOutput, libgobuster.SARIFRunInfo{
+			Mode:     plugin.Name(),
+			Target:   target,
+			Wordlist: opts.Wordlist,
+		})
+		if err != nil {
+			return fmt.Errorf("error on creating SARIF output: %w", err)
+		}
+	}
+
 	// our waitgroup for all goroutines
 	// this ensures all goroutines are finished
 	// when we call wg.Wait()
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	go resultWorker(gobuster, opts.OutputFilename, &wg)
+	go resultWorker(gobuster, opts.OutputFilename, sarifWriter, &wg)
 
 	wg.Add(1)
 	go errorWorker(gobuster, &wg)
@@ -207,6 +226,12 @@ func Gobuster(ctx context.Context, opts *libgobuster.Options, plugin libgobuster
 	cancel()
 	// wait for all spun up goroutines to finish (all have to call wg.Done())
 	wg.Wait()
+
+	if sarifWriter != nil {
+		if closeErr := sarifWriter.Close(err); closeErr != nil {
+			return fmt.Errorf("error on writing SARIF output: %w", closeErr)
+		}
+	}
 
 	// Late error checking to finish all threads
 	if err != nil {
