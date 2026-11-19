@@ -11,6 +11,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 // HTTPHeader holds a single key value pair of a HTTP header
@@ -34,6 +35,61 @@ type HTTPClient struct {
 	logger                *Logger
 }
 
+// RedirectHop is a single entry of a recorded redirect chain.
+type RedirectHop struct {
+	// Status is the status code that issued the redirect.
+	Status int
+	// Location is the target the redirect pointed to (as sent by the server).
+	Location string
+	// URL is the fully resolved URL the next request was sent to.
+	URL string
+}
+
+// RedirectRecorder collects the redirect chain of a single request.
+// A fresh instance must be supplied per request via RequestOptions.
+type RedirectRecorder struct {
+	mu     sync.Mutex
+	hops   []RedirectHop
+	loop   bool
+	cutOff bool
+}
+
+// record is invoked by the http client CheckRedirect hook.
+func (r *RedirectRecorder) record(hop RedirectHop, loop, cutOff bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hops = append(r.hops, hop)
+	if loop {
+		r.loop = true
+	}
+	if cutOff {
+		r.cutOff = true
+	}
+}
+
+// Hops returns a copy of the recorded redirect chain.
+func (r *RedirectRecorder) Hops() []RedirectHop {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]RedirectHop, len(r.hops))
+	copy(out, r.hops)
+	return out
+}
+
+// Loop reports whether the redirect chain contained a cycle.
+func (r *RedirectRecorder) Loop() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.loop
+}
+
+// CutOff reports whether the chain was truncated at MaxRedirectHops.
+func (r *RedirectRecorder) CutOff() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cutOff
+}
+
 // RequestOptions is used to pass options to a single individual request
 type RequestOptions struct {
 	Host                     string
@@ -42,6 +98,23 @@ type RequestOptions struct {
 	ModifiedHeaders          []HTTPHeader
 	UpdatedBasicAuthUsername string
 	UpdatedBasicAuthPassword string
+	// RedirectRecorder, when set, records every redirect hop of this request.
+	// It must not be reused concurrently across requests.
+	RedirectRecorder *RedirectRecorder
+}
+
+type redirectRecorderContextKey struct{}
+
+func withRedirectRecorder(ctx context.Context, r *RedirectRecorder) context.Context {
+	if r == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, redirectRecorderContextKey{}, r)
+}
+
+func redirectRecorderFromContext(ctx context.Context) *RedirectRecorder {
+	r, _ := ctx.Value(redirectRecorderContextKey{}).(*RedirectRecorder)
+	return r
 }
 
 // NewHTTPClient returns a new HTTPClient
@@ -68,7 +141,40 @@ func NewHTTPClient(opt *HTTPOptions, logger *Logger) (*HTTPClient, error) {
 			return http.ErrUseLastResponse
 		}
 	} else {
-		redirectFunc = nil
+		// Default behaviour is preserved (up to 10 automatic hops). When a
+		// request carries a RedirectRecorder the chain - including cycles and
+		// truncation - is recorded while the response handling is unchanged.
+		redirectFunc = func(req *http.Request, via []*http.Request) error {
+			recorder := redirectRecorderFromContext(req.Context())
+			if recorder == nil {
+				return checkRedirectLimit(len(via))
+			}
+
+			// req.Response is the response that issued this redirect
+			// (the previous hop); requests inside via only carry URLs
+			hop := RedirectHop{URL: req.URL.String()}
+			if req.Response != nil {
+				hop.Status = req.Response.StatusCode
+				hop.Location = req.Response.Header.Get("Location")
+			}
+
+			visited := make(map[string]bool, len(via)+1)
+			for _, v := range via {
+				visited[v.URL.String()] = true
+			}
+			loop := visited[req.URL.String()]
+			cutOff := len(via) >= MaxRedirectHops
+			recorder.record(hop, loop, cutOff)
+
+			switch {
+			case loop || cutOff:
+				// stop following but keep the last response; the recorded
+				// flags surface the anomalous chain instead of an error loop
+				return http.ErrUseLastResponse
+			default:
+				return checkRedirectLimit(len(via))
+			}
+		}
 	}
 
 	tlsConfig := tls.Config{
@@ -161,7 +267,16 @@ func (client *HTTPClient) Request(ctx context.Context, fullURL url.URL, opts Req
 	return resp.StatusCode, length, resp.Header, body, nil
 }
 
+func checkRedirectLimit(viaLen int) error {
+	// mirrors net/http.defaultCheckRedirect with the exported limit constant
+	if viaLen >= MaxRedirectHops {
+		return fmt.Errorf("stopped after %d redirects", MaxRedirectHops)
+	}
+	return nil
+}
+
 func (client *HTTPClient) makeRequest(ctx context.Context, fullURL url.URL, opts RequestOptions) (*http.Response, error) {
+	ctx = withRedirectRecorder(ctx, opts.RedirectRecorder)
 	req, err := http.NewRequestWithContext(ctx, client.method, fullURL.String(), opts.Body)
 	if err != nil {
 		return nil, err

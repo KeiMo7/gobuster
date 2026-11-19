@@ -154,6 +154,10 @@ func (d *GobusterDNS) ProcessWord(ctx context.Context, word string, progress *li
 		}
 		return result, nil
 	}
+	// the resolved IPs match the wildcard baseline, so it is filtered out
+	if d.globalopts.Stable {
+		progress.IncrementFiltered(libgobuster.FilterWildcard)
+	}
 	return nil, nil // nolint:nilnil
 }
 

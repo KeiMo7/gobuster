@@ -252,9 +252,15 @@ func (d *GobusterDir) ProcessWord(ctx context.Context, word string, progress *li
 	var statusCode int
 	var size int64
 	var header http.Header
+	var recorder *libgobuster.RedirectRecorder
+	requestOpts := libgobuster.RequestOptions{}
+	if d.globalopts.Stable {
+		recorder = &libgobuster.RedirectRecorder{}
+		requestOpts.RedirectRecorder = recorder
+	}
 	for i := 1; i <= tries; i++ {
 		var err error
-		statusCode, size, header, _, err = d.http.Request(ctx, url, libgobuster.RequestOptions{})
+		statusCode, size, header, _, err = d.http.Request(ctx, url, requestOpts)
 		if err != nil {
 			// check if it's a timeout and if we should try again and try again
 			// otherwise the timeout error is raised
@@ -296,27 +302,59 @@ func (d *GobusterDir) ProcessWord(ctx context.Context, word string, progress *li
 			return nil, errors.New("StatusCodes and StatusCodesBlacklist are both not set which should not happen")
 		}
 
-		if resultStatus && !d.options.ExcludeLengthParsed.Contains(int(size)) {
-			path := fmt.Sprintf("%-20s", entity)
-			if d.options.Expanded {
-				// expanded mode should show the full url
-				path = url.String()
+		if !resultStatus {
+			if d.globalopts.Stable {
+				progress.IncrementFiltered(libgobuster.FilterStatus)
 			}
-
-			r := Result{
-				Path:       path,
-				Header:     header,
-				StatusCode: -1,
-				Size:       -1,
-			}
-			if !d.options.NoStatus {
-				r.StatusCode = statusCode
-			}
-			if !d.options.HideLength {
-				r.Size = size
-			}
-			return r, nil
+			return nil, nil // nolint:nilnil
 		}
+		if d.options.ExcludeLengthParsed.Contains(int(size)) {
+			if d.globalopts.Stable {
+				progress.IncrementFiltered(libgobuster.FilterLength)
+			}
+			return nil, nil // nolint:nilnil
+		}
+
+		path := fmt.Sprintf("%-20s", entity)
+		if d.options.Expanded {
+			// expanded mode should show the full url
+			path = url.String()
+		}
+
+		r := Result{
+			Path:       path,
+			Header:     header,
+			StatusCode: -1,
+			Size:       -1,
+		}
+		if !d.options.NoStatus {
+			r.StatusCode = statusCode
+		} else if d.globalopts.Stable {
+			r.StatusHidden = true
+		}
+		if !d.options.HideLength {
+			r.Size = size
+		} else if d.globalopts.Stable {
+			r.SizeHidden = true
+		}
+
+		if d.globalopts.Stable {
+			fullURL := url
+			r.FullURL = &fullURL
+			if recorder != nil {
+				r.Chain = &libgobuster.RedirectChain{
+					Hops:     recorder.Hops(),
+					FinalURL: fullURL.String(),
+					Loop:     recorder.Loop(),
+					CutOff:   recorder.CutOff(),
+				}
+				// the final URL is where the client actually landed
+				if hops := recorder.Hops(); len(hops) > 0 {
+					r.Chain.FinalURL = hops[len(hops)-1].URL
+				}
+			}
+		}
+		return r, nil
 	}
 
 	return nil, nil // nolint:nilnil

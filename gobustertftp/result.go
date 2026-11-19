@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -33,4 +34,25 @@ func (r Result) ResultToString() (string, error) {
 
 	s := buf.String()
 	return s, nil
+}
+
+// StableKey returns the normalized target identity used for deduplication.
+func (r Result) StableKey() string {
+	return libgobuster.CanonicalKey("tftp", r.Filename)
+}
+
+// StableRecord converts the result to the mode independent stable record.
+func (r Result) StableRecord() libgobuster.StableRecord {
+	rec := libgobuster.StableRecord{
+		Key:    r.StableKey(),
+		Target: r.Filename,
+	}
+	// a real length of zero is rendered as 0; a missing size stays empty
+	if r.Size > 0 {
+		rec.Sizes = []int64{r.Size}
+	}
+	if r.ErrorMessage != "" {
+		rec.Extra = "Error=" + r.ErrorMessage
+	}
+	return rec
 }

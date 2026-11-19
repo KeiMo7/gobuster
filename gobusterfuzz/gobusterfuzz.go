@@ -156,6 +156,11 @@ func (d *GobusterFuzz) ProcessWord(ctx context.Context, word string, progress *l
 	var statusCode int
 	var size int64
 	var responseHeaders http.Header
+	var recorder *libgobuster.RedirectRecorder
+	if d.globalopts.Stable {
+		recorder = &libgobuster.RedirectRecorder{}
+		requestOptions.RedirectRecorder = recorder
+	}
 	for i := 1; i <= tries; i++ {
 		var err error
 		statusCode, size, responseHeaders, _, err = d.http.Request(ctx, url, requestOptions)
@@ -190,11 +195,17 @@ func (d *GobusterFuzz) ProcessWord(ctx context.Context, word string, progress *l
 
 		if d.options.ExcludeLengthParsed.Contains(int(size)) {
 			resultStatus = false
+			if d.globalopts.Stable {
+				progress.IncrementFiltered(libgobuster.FilterLength)
+			}
 		}
 
 		if d.options.ExcludedStatusCodesParsed.Length() > 0 {
 			if d.options.ExcludedStatusCodesParsed.Contains(statusCode) {
 				resultStatus = false
+				if d.globalopts.Stable {
+					progress.IncrementFiltered(libgobuster.FilterStatus)
+				}
 			}
 		}
 
@@ -205,6 +216,23 @@ func (d *GobusterFuzz) ProcessWord(ctx context.Context, word string, progress *l
 				Size:       size,
 				Word:       word,
 				Header:     responseHeaders,
+			}
+			if d.globalopts.Stable {
+				fullURL := url
+				r.FullURL = &fullURL
+			}
+			if d.globalopts.Stable && recorder != nil {
+				hops := recorder.Hops()
+				final := url.String()
+				if len(hops) > 0 {
+					final = hops[len(hops)-1].URL
+				}
+				r.Chain = &libgobuster.RedirectChain{
+					Hops:     hops,
+					FinalURL: final,
+					Loop:     recorder.Loop(),
+					CutOff:   recorder.CutOff(),
+				}
 			}
 			return r, nil
 		}

@@ -226,6 +226,9 @@ func GlobalOptions() []cli.Flag {
 		&cli.StringFlag{Name: "discover-pattern", Aliases: []string{"pd"}, Usage: "File containing replacement patterns applied to successful guesses"},
 		&cli.BoolFlag{Name: "no-color", Aliases: []string{"nc"}, Value: false, Usage: "Disable color output"},
 		&cli.BoolFlag{Name: "debug", Value: false, Usage: "enable debug output"},
+		&cli.BoolFlag{Name: "stable", Value: false, Usage: "Emit deterministic, deduplicated and sorted terminal output instead of streaming results"},
+		&cli.StringFlag{Name: "output-format", Value: libgobuster.OutputFormatText, Usage: "Rendering of the stable output: text or tsv (machine parseable, implies --stable)"},
+		&cli.BoolFlag{Name: "no-chain", Value: false, Usage: "Do not include the redirect chain field in stable output"},
 	}
 }
 
@@ -297,6 +300,10 @@ func ParseGlobalOptions(c *cli.Context) (libgobuster.Options, error) {
 	}
 
 	opts.Debug = c.Bool("debug")
+	opts.Stable = c.Bool("stable")
+	opts.OutputFormat = c.String("output-format")
+	opts.NoChain = c.Bool("no-chain")
+	opts.StableChunkSize = libgobuster.DefaultStableChunkSize
 	return opts, nil
 }
 

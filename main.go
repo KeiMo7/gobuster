@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"syscall"
 
 	"github.com/OJ/gobuster/v3/cli/dir"
 	"github.com/OJ/gobuster/v3/cli/dns"
@@ -56,7 +59,13 @@ func main() {
 		},
 	}
 
-	err := app.Run(os.Args)
+	// A first interrupt cancels the run context so workers stop at a safe
+	// point and the stable output of the completed part is rendered. A second
+	// interrupt restores the default hard termination.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	err := app.RunContext(ctx, os.Args)
 	if err != nil {
 		log.Fatal(err)
 	}

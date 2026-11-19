@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,9 +21,22 @@ const (
 
 // resultWorker outputs the results as they come in. This needs to be a range and should not handle
 // the context so the channel always has a receiver and libgobuster will not block.
+//
+// In legacy mode results are streamed exactly as before. In stable mode every
+// observation is handed to an Aggregator and the deterministic, deduplicated
+// terminal output is rendered once the result channel is drained, so progress
+// output can never interleave with the result stream.
 func resultWorker(g *libgobuster.Gobuster, filename string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	if !g.Opts.Stable {
+		resultWorkerLegacy(g, filename)
+		return
+	}
+	resultWorkerStable(g, filename)
+}
+
+func resultWorkerLegacy(g *libgobuster.Gobuster, filename string) {
 	var f *os.File
 	var err error
 	if filename != "" {
@@ -56,12 +70,96 @@ func resultWorker(g *libgobuster.Gobuster, filename string, wg *sync.WaitGroup) 
 	}
 }
 
+func resultWorkerStable(g *libgobuster.Gobuster, filename string) {
+	aggregator := libgobuster.NewAggregator(g.Opts.StableChunkSize)
+
+	for r := range g.Progress.ResultChan {
+		normalized, ok := r.(libgobuster.NormalizedResult)
+		if !ok {
+			// a plugin without stable support must not silently drop data;
+			// fall back to its legacy string on the result channel
+			s, err := r.ResultToString()
+			if err != nil {
+				g.Logger.Fatal(err)
+			}
+			fmt.Print(s) // nolint forbidigo
+			continue
+		}
+		if err := aggregator.Add(normalized.StableRecord()); err != nil {
+			g.Logger.Fatal(err)
+		}
+	}
+
+	iter, spilled, err := aggregator.Finalize()
+	if err != nil {
+		g.Logger.Fatal(err)
+	}
+	defer func() { _ = iter.Close() }()
+
+	// render the whole terminal output into one buffer first so stdout and
+	// the output file are byte identical and a write failure can never leave
+	// a half line behind
+	var buf bytes.Buffer
+	unique, err := libgobuster.RenderStable(&buf, iter, g.Opts.OutputFormat, !g.Opts.NoChain)
+	if err != nil {
+		g.Logger.Fatal(err)
+	}
+	// capture the bytes before any sink consumes the buffer; both sinks must
+	// emit exactly the same sequence
+	data := buf.Bytes()
+
+	if _, err := os.Stdout.Write(data); err != nil {
+		// whatever was already written stays intact; report instead of dropping
+		g.Logger.Fatalf("error on writing output: %v", err)
+	}
+
+	if filename != "" {
+		if err := writeAllToFile(filename, data); err != nil {
+			// preserve already written content and surface the failure loudly
+			g.Logger.Errorf("error on writing output file: %v", err)
+			g.Logger.Fatal(err)
+		}
+	}
+
+	// statistics live on the log channel (stderr), never in the result stream
+	stats := libgobuster.StatsReport{
+		RequestsTotal:    g.Progress.RequestsIssued(),
+		UniqueResults:    unique,
+		FilteredStatus:   g.Progress.FilteredStatus(),
+		FilteredLength:   g.Progress.FilteredLength(),
+		FilteredWildcard: g.Progress.FilteredWildcard(),
+		Errors:           g.Progress.ErrorsCount(),
+		SpilledChunks:    spilled,
+	}
+	_ = libgobuster.RenderStats(os.Stderr, stats)
+}
+
+// writeAllToFile creates the output file and writes data in a single call per
+// line boundary, syncing before close. On error the partially written file is
+// kept and the error is returned.
+func writeAllToFile(filename string, data []byte) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("[!] Unable to create file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("[!] Unable to write to file %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("[!] Unable to sync file %w", err)
+	}
+	return nil
+}
+
 // errorWorker outputs the errors as they come in. This needs to be a range and should not handle
 // the context so the channel always has a receiver and libgobuster will not block.
 func errorWorker(g *libgobuster.Gobuster, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for e := range g.Progress.ErrorChan {
+		g.Progress.IncrementErrors()
 		if !g.Opts.Quiet && !g.Opts.NoError {
 			g.Logger.Error(e.Error())
 			g.Logger.Debugf("%#v", e)
@@ -142,7 +240,17 @@ func Gobuster(ctx context.Context, opts *libgobuster.Options, plugin libgobuster
 	}
 
 	if plugin == nil {
-		return errors.New("please provide a valid plugin")
+		return errors.New("please provide valid plugin")
+	}
+
+	switch opts.OutputFormat {
+	case "", libgobuster.OutputFormatText, libgobuster.OutputFormatTSV:
+	default:
+		return fmt.Errorf("invalid value for output-format %q", opts.OutputFormat)
+	}
+	// the machine parseable format implies the stable pipeline
+	if opts.OutputFormat == libgobuster.OutputFormatTSV {
+		opts.Stable = true
 	}
 
 	ctxCancel, cancel := context.WithCancel(ctx)
@@ -194,8 +302,9 @@ func Gobuster(ctx context.Context, opts *libgobuster.Options, plugin libgobuster
 	wg.Add(1)
 	go messageWorker(gobuster, &wg)
 
-	if !opts.Quiet && !opts.NoProgress {
-		// if not quiet add a new workgroup entry and start the goroutine
+	if !opts.Quiet && !opts.NoProgress && !opts.Stable {
+		// in stable mode the terminal output is rendered at the end, so a live
+		// progress line would only create noise; progress counters still run
 		wg.Add(1)
 		go progressWorker(ctxCancel, gobuster, &wg)
 	}
@@ -213,7 +322,7 @@ func Gobuster(ctx context.Context, opts *libgobuster.Options, plugin libgobuster
 		return err
 	}
 
-	if !opts.Quiet {
+	if !opts.Quiet && !opts.Stable {
 		log.Println(ruler)
 		gobuster.Logger.Println("Finished")
 		log.Println(ruler)

@@ -168,9 +168,15 @@ func (v *GobusterVhost) ProcessWord(ctx context.Context, word string, progress *
 	var size int64
 	var header http.Header
 	var body []byte
+	requestOpts := libgobuster.RequestOptions{Host: subdomain, ReturnBody: true}
+	var recorder *libgobuster.RedirectRecorder
+	if v.globalopts.Stable {
+		recorder = &libgobuster.RedirectRecorder{}
+		requestOpts.RedirectRecorder = recorder
+	}
 	for i := 1; i <= tries; i++ {
 		var err error
-		statusCode, size, header, body, err = v.http.Request(ctx, *v.options.URL, libgobuster.RequestOptions{Host: subdomain, ReturnBody: true})
+		statusCode, size, header, body, err = v.http.Request(ctx, *v.options.URL, requestOpts)
 		if err != nil {
 			// check if it's a timeout and if we should try again and try again
 			// otherwise the timeout error is raised
@@ -200,16 +206,50 @@ func (v *GobusterVhost) ProcessWord(ctx context.Context, word string, progress *
 	// subdomain must not match default vhost and non existent vhost
 	// or verbose mode is enabled
 	found := body != nil && !bytes.Equal(body, v.normalBody) && !bytes.Equal(body, v.abnormalBody)
-	if found && !v.options.ExcludeLengthParsed.Contains(int(size)-hostnameLength) && !v.options.ExcludeStatusParsed.Contains(statusCode) {
-		r := Result{
-			Vhost:      subdomain,
-			StatusCode: statusCode,
-			Size:       size,
-			Header:     header,
+	if found {
+		if v.globalopts.Stable {
+			switch {
+			case v.options.ExcludeLengthParsed.Contains(int(size) - hostnameLength):
+				progress.IncrementFiltered(libgobuster.FilterLength)
+				return nil, nil // nolint:nilnil
+			case v.options.ExcludeStatusParsed.Contains(statusCode):
+				progress.IncrementFiltered(libgobuster.FilterStatus)
+				return nil, nil // nolint:nilnil
+			}
+		} else if v.options.ExcludeLengthParsed.Contains(int(size)-hostnameLength) || v.options.ExcludeStatusParsed.Contains(statusCode) {
+			return nil, nil // nolint:nilnil
 		}
-		return r, nil
+	} else {
+		// indistinguishable from the wildcard/abnormal baseline response
+		if v.globalopts.Stable {
+			progress.IncrementFiltered(libgobuster.FilterWildcard)
+		}
+		return nil, nil // nolint:nilnil
 	}
-	return nil, nil // nolint:nilnil
+	r := Result{
+		Vhost:      subdomain,
+		StatusCode: statusCode,
+		Size:       size,
+		Header:     header,
+	}
+	if v.globalopts.Stable {
+		base := *v.options.URL
+		r.BaseURL = &base
+		if recorder != nil {
+			hops := recorder.Hops()
+			final := base.String()
+			if len(hops) > 0 {
+				final = hops[len(hops)-1].URL
+			}
+			r.Chain = &libgobuster.RedirectChain{
+				Hops:     hops,
+				FinalURL: final,
+				Loop:     recorder.Loop(),
+				CutOff:   recorder.CutOff(),
+			}
+		}
+	}
+	return r, nil
 }
 
 func (v *GobusterVhost) AdditionalWordsLen() int {

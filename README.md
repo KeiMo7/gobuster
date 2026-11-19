@@ -131,6 +131,34 @@ gobuster dir -u https://example.com -w wordlist.txt -l
 gobuster dir -u https://example.com -w wordlist.txt -s 200,301,302
 ```
 
+**Stable, machine parseable output:**
+
+By default results are streamed as they arrive, so their order depends on
+scheduling and duplicate paths can appear more than once. The stable pipeline
+trades live streaming for a deterministic terminal output:
+
+```bash
+# deduplicated, fully sorted output (repeated runs are byte identical)
+gobuster dir -u https://example.com -w wordlist.txt --stable
+
+# tab separated values with fixed columns for scripting; implies --stable.
+# "-" marks an empty field and "*" marks a deliberately hidden one, so a
+# hidden status/length is never confused with a real zero.
+gobuster dir -u https://example.com -w wordlist.txt --output-format tsv
+
+# omit the redirect chain column (start status, hops and final landing)
+gobuster dir -u https://example.com -w wordlist.txt --stable --no-chain
+```
+
+In stable mode each normalized target (scheme, host, path and query) is
+emitted once: repeated dictionary rows, extension overlaps and success-derived
+words collapse into one record, while distinct status codes or lengths become
+multi-value fields. Large result sets are merged in sorted chunks so the
+memory peak stays bounded, the same bytes go to stdout and the output file,
+and an interrupted run only ever contains complete lines. A fixed statistics
+block (total requests, unique results, filtered counts and errors) is printed
+on the log channel, separate from the result stream.
+
 #### 🔍 DNS Mode (`dns`)
 
 Discover subdomains through DNS resolution.

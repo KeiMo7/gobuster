@@ -3,7 +3,9 @@ package gobustervhost
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -22,6 +24,11 @@ type Result struct {
 	StatusCode int
 	Size       int64
 	Header     http.Header
+	// BaseURL is the scheme and host the vhost was requested against
+	// (stable mode only).
+	BaseURL *url.URL
+	// Chain is the recorded redirect chain (stable mode only).
+	Chain *libgobuster.RedirectChain
 }
 
 // ResultToString converts the Result to its textual representation
@@ -47,4 +54,28 @@ func (r Result) ResultToString() (string, error) {
 	}
 
 	return fmt.Sprintf("%s %s [Size: %d]%s\n", r.Vhost, statusCode, r.Size, locationString), nil
+}
+
+// StableKey returns the normalized target identity used for deduplication.
+// The vhost itself participates in the host part so two different vhosts
+// sharing a path never merge.
+func (r Result) StableKey() string {
+	return libgobuster.CanonicalKey("vhost", r.Vhost)
+}
+
+// StableRecord converts the result to the mode independent stable record.
+func (r Result) StableRecord() libgobuster.StableRecord {
+	rec := libgobuster.StableRecord{
+		Key:      r.StableKey(),
+		Target:   r.Vhost,
+		Statuses: []int{r.StatusCode},
+		Sizes:    []int64{r.Size},
+		Location: r.Header.Get("Location"),
+		Chain:    r.Chain,
+	}
+	if r.BaseURL != nil {
+		rec.Scheme = r.BaseURL.Scheme
+		rec.Host = r.Vhost
+	}
+	return rec
 }

@@ -3,6 +3,7 @@ package gobustergcs
 import (
 	"bytes"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -30,4 +31,24 @@ func (r Result) ResultToString() (string, error) {
 
 	str := buf.String()
 	return str, nil
+}
+
+// StableKey returns the normalized target identity used for deduplication.
+func (r Result) StableKey() string {
+	return libgobuster.CanonicalKey("gcs", r.BucketName)
+}
+
+// StableRecord converts the result to the mode independent stable record.
+func (r Result) StableRecord() libgobuster.StableRecord {
+	target := "https://storage.googleapis.com/storage/v1/b/" + r.BucketName + "/o"
+	rec := libgobuster.StableRecord{
+		Key:    r.StableKey(),
+		Target: target,
+		Scheme: "https",
+		Host:   "storage.googleapis.com",
+	}
+	if r.Status != "" {
+		rec.Extra = r.Status
+	}
+	return rec
 }

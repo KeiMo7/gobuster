@@ -3,6 +3,7 @@ package gobusters3
 import (
 	"bytes"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -30,4 +31,24 @@ func (r Result) ResultToString() (string, error) {
 
 	str := buf.String()
 	return str, nil
+}
+
+// StableKey returns the normalized target identity used for deduplication.
+func (r Result) StableKey() string {
+	return libgobuster.CanonicalKey("s3", r.BucketName)
+}
+
+// StableRecord converts the result to the mode independent stable record.
+func (r Result) StableRecord() libgobuster.StableRecord {
+	target := "http://" + r.BucketName + ".s3.amazonaws.com/"
+	rec := libgobuster.StableRecord{
+		Key:    r.StableKey(),
+		Target: target,
+		Scheme: "http",
+		Host:   r.BucketName + ".s3.amazonaws.com",
+	}
+	if r.Status != "" {
+		rec.Extra = r.Status
+	}
+	return rec
 }

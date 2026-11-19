@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/OJ/gobuster/v3/libgobuster"
 	"github.com/fatih/color"
 )
 
@@ -44,4 +45,33 @@ func (r Result) ResultToString() (string, error) {
 
 	s := buf.String()
 	return s, nil
+}
+
+// StableKey returns the normalized target identity used for deduplication.
+func (r Result) StableKey() string {
+	return libgobuster.CanonicalKey("dns", strings.ToLower(r.Subdomain))
+}
+
+// StableRecord converts the result to the mode independent stable record.
+func (r Result) StableRecord() libgobuster.StableRecord {
+	ips := make([]string, len(r.IPs))
+	for i := range r.IPs {
+		ips[i] = r.IPs[i].String()
+	}
+	extra := ""
+	if len(ips) > 0 {
+		extra = "IPs=" + strings.Join(ips, ",")
+	}
+	if r.CNAME != "" {
+		if extra != "" {
+			extra += " "
+		}
+		extra += "CNAME=" + r.CNAME
+	}
+	return libgobuster.StableRecord{
+		Key:    r.StableKey(),
+		Target: r.Subdomain,
+		Host:   strings.ToLower(r.Subdomain),
+		Extra:  extra,
+	}
 }
