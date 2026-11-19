@@ -131,6 +131,46 @@ gobuster dir -u https://example.com -w wordlist.txt -l
 gobuster dir -u https://example.com -w wordlist.txt -s 200,301,302
 ```
 
+**Adaptive rate limiting and observable backoff:**
+
+Gobuster can pace requests per target and adapt that pace when the target
+signals rate limiting (HTTP 429, a 503 with `Retry-After`, or a rate limit
+header that reports an exhausted budget). The rate is lowered on the signal and
+recovers gradually after a number of consecutive successful responses.
+
+```bash
+# Lower the rate per target when it signals rate limiting and recover afterwards
+gobuster dir -u https://example.com -w wordlist.txt --adaptive-rate
+
+# Tune the adaptive range and how quickly it recovers
+gobuster dir -u https://example.com -w wordlist.txt --adaptive-rate \
+    --rate-min 2 --rate-max 50 --rate-recovery-successes 20
+
+# Give up on a target after 10 consecutive rate limit signals (-1 keeps retrying)
+gobuster dir -u https://example.com -w wordlist.txt --adaptive-rate --rate-max-limited 10
+
+# Pin a fixed rate; it always overrides the adaptive result
+gobuster dir -u https://example.com -w wordlist.txt --rate 10
+
+# Keep a record of every rate change (target ids only, no addresses/headers)
+gobuster dir -u https://example.com -w wordlist.txt --adaptive-rate \
+    --rate-history rate.jsonl
+```
+
+Notes:
+
+- Rate state is tracked and paced per target (scheme and host), aggregated
+  across all worker goroutines. Several targets in one run are independent.
+- Only explicit response signals are used, never request durations.
+- Without a rate limit signal the request behaviour is unchanged; `-t` still
+  controls concurrency and `--delay` still applies.
+- The progress line shows `[rate-limited, N req/s]` while a target is limited,
+  and `--rate-history` records `limited`/`backoff`/`recovered` transitions as
+  JSON lines with a synthetic target id.
+- If the rate control itself fails it degrades to a fixed rate instead of
+  aborting the run, and a failed history write is retried at the end of the run.
+
+
 #### 🔍 DNS Mode (`dns`)
 
 Discover subdomains through DNS resolution.
@@ -306,7 +346,7 @@ gobuster gcs -w company-names.txt -v
 1. **Always get proper authorization** before testing any target
 2. **Start with low thread counts** to avoid overwhelming servers
 3. **Use appropriate wordlists** for the target technology
-4. **Respect rate limits** and implement delays if needed
+4. **Respect rate limits** — use `--adaptive-rate` (and optionally `--rate`) so gobuster backs off when the target signals rate limiting instead of hammering it
 5. **Monitor your network traffic** to avoid detection
 
 ### Wordlist Selection
@@ -341,6 +381,18 @@ gobuster dir -u https://example.com -w wordlist.txt -q
 _Remember: Always test responsibly and with proper authorization._
 
 # Changes
+
+<details>
+<summary>Unreleased</summary>
+
+## Unreleased
+
+- Add adaptive rate limiting (`--adaptive-rate`) with per target, observable
+  backoff and recovery. Optional flags: `--rate`, `--rate-min`, `--rate-max`,
+  `--rate-recovery-successes`, `--rate-max-limited`, `--rate-history`.
+  Output is unchanged unless one of these flags is used.
+
+</details>
 
 <details>
 

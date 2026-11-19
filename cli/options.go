@@ -226,6 +226,13 @@ func GlobalOptions() []cli.Flag {
 		&cli.StringFlag{Name: "discover-pattern", Aliases: []string{"pd"}, Usage: "File containing replacement patterns applied to successful guesses"},
 		&cli.BoolFlag{Name: "no-color", Aliases: []string{"nc"}, Value: false, Usage: "Disable color output"},
 		&cli.BoolFlag{Name: "debug", Value: false, Usage: "enable debug output"},
+		&cli.BoolFlag{Name: "adaptive-rate", Aliases: []string{"ar"}, Value: false, Usage: "Automatically lower the request rate per target when it signals rate limiting (429, Retry-After, exhausted rate limit headers) and recover it afterwards"},
+		&cli.Float64Flag{Name: "rate", Aliases: []string{"rl"}, Usage: "Fixed request rate limit per second and target. Overrides the adaptive rate"},
+		&cli.Float64Flag{Name: "rate-min", Value: 1, Usage: "Lowest adaptive request rate per second and target (requires --adaptive-rate)"},
+		&cli.Float64Flag{Name: "rate-max", Value: 100, Usage: "Highest adaptive request rate per second and target (requires --adaptive-rate)"},
+		&cli.IntFlag{Name: "rate-recovery-successes", Value: 10, Usage: "Consecutive responses without rate limit signal before the rate is increased (requires --adaptive-rate)"},
+		&cli.IntFlag{Name: "rate-max-limited", Value: 20, Usage: "Stop enumerating a target after this many consecutive rate limit signals. Set to -1 to keep retrying (requires --adaptive-rate)"},
+		&cli.StringFlag{Name: "rate-history", Usage: "Write rate limit state transitions as JSON lines to this file. Never contains target addresses or header values"},
 	}
 }
 
@@ -247,6 +254,12 @@ func ParseGlobalOptions(c *cli.Context) (libgobuster.Options, error) {
 	} else if opts.WordlistOffset < 0 {
 		return opts, errors.New("wordlist-offset must be bigger or equal to 0")
 	}
+
+	rateOpts, err := parseRateLimitOptions(c)
+	if err != nil {
+		return opts, err
+	}
+	opts.RateLimit = rateOpts
 
 	opts.OutputFilename = c.String("output")
 	opts.Quiet = c.Bool("quiet")
@@ -298,6 +311,36 @@ func ParseGlobalOptions(c *cli.Context) (libgobuster.Options, error) {
 
 	opts.Debug = c.Bool("debug")
 	return opts, nil
+}
+
+func parseRateLimitOptions(c *cli.Context) (libgobuster.RateLimitConfig, error) {
+	var cfg libgobuster.RateLimitConfig
+
+	cfg.Adaptive = c.Bool("adaptive-rate")
+	cfg.ManualRate = c.Float64("rate")
+	cfg.MinRate = c.Float64("rate-min")
+	cfg.MaxRate = c.Float64("rate-max")
+	cfg.RecoverySuccesses = c.Int("rate-recovery-successes")
+	cfg.MaxConsecutiveLimits = c.Int("rate-max-limited")
+	cfg.HistoryFile = c.String("rate-history")
+
+	if cfg.ManualRate < 0 {
+		return cfg, errors.New("rate must be bigger or equal to 0")
+	}
+	if cfg.MinRate <= 0 || cfg.MaxRate <= 0 {
+		return cfg, errors.New("rate-min and rate-max must be bigger than 0")
+	}
+	if cfg.MinRate > cfg.MaxRate {
+		return cfg, errors.New("rate-min must not be bigger than rate-max")
+	}
+	if cfg.RecoverySuccesses <= 0 {
+		return cfg, errors.New("rate-recovery-successes must be bigger than 0")
+	}
+	if cfg.MaxConsecutiveLimits == 0 || cfg.MaxConsecutiveLimits < -1 {
+		return cfg, errors.New("rate-max-limited must be bigger than 0 or -1 to disable stopping")
+	}
+
+	return cfg, nil
 }
 
 func getLocalAddrFromInterface(iface string) (*net.TCPAddr, error) {

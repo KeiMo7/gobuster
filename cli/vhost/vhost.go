@@ -82,6 +82,8 @@ func run(c *cli.Context) error {
 
 	log := libgobuster.NewLogger(globalOpts.Debug)
 
+	pluginOpts.RateLimit = globalOpts.RateLimit
+
 	plugin, err := gobustervhost.New(&globalOpts, pluginOpts, log)
 	if err != nil {
 		return fmt.Errorf("error on creating gobustervhost: %w", err)

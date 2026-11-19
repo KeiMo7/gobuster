@@ -52,6 +52,7 @@ func New(globalopts *libgobuster.Options, opts *OptionsVhost, logger *libgobuste
 		RetryOnTimeout:  opts.RetryOnTimeout,
 		RetryAttempts:   opts.RetryAttempts,
 		TLSCertificate:  opts.TLSCertificate,
+		RateLimit:       opts.RateLimit,
 	}
 
 	httpOpts := libgobuster.HTTPOptions{
@@ -78,6 +79,11 @@ func (v *GobusterVhost) Name() string {
 	return "VHOST enumeration"
 }
 
+// RateLimiter returns the rate limiter used for the requests of this plugin.
+func (v *GobusterVhost) RateLimiter() *libgobuster.RateLimiter {
+	return v.http.RateLimiter()
+}
+
 // PreRun is the pre run implementation of gobusterdir
 func (v *GobusterVhost) PreRun(ctx context.Context, _ *libgobuster.Progress) error {
 	// add trailing slash
@@ -95,6 +101,8 @@ func (v *GobusterVhost) PreRun(ctx context.Context, _ *libgobuster.Progress) err
 	_, _, _, body, err := v.http.Request(ctx, *v.options.URL, libgobuster.RequestOptions{ReturnBody: true})
 	if err != nil {
 		switch {
+		case errors.Is(err, libgobuster.ErrRateLimitExhausted):
+			return libgobuster.ErrRateLimitExhausted
 		case errors.Is(err, io.EOF):
 			return libgobuster.ErrEOF
 		case os.IsTimeout(err):
@@ -111,6 +119,8 @@ func (v *GobusterVhost) PreRun(ctx context.Context, _ *libgobuster.Progress) err
 	_, _, _, body, err = v.http.Request(ctx, *v.options.URL, libgobuster.RequestOptions{Host: subdomain, ReturnBody: true})
 	if err != nil {
 		switch {
+		case errors.Is(err, libgobuster.ErrRateLimitExhausted):
+			return libgobuster.ErrRateLimitExhausted
 		case errors.Is(err, io.EOF):
 			return libgobuster.ErrEOF
 		case os.IsTimeout(err):
@@ -184,6 +194,8 @@ func (v *GobusterVhost) ProcessWord(ctx context.Context, word string, progress *
 				continue
 			default:
 				switch {
+				case errors.Is(err, libgobuster.ErrRateLimitExhausted):
+					return nil, libgobuster.ErrRateLimitExhausted
 				case errors.Is(err, io.EOF):
 					return nil, libgobuster.ErrEOF
 				case os.IsTimeout(err):
@@ -246,6 +258,10 @@ func (v *GobusterVhost) GetConfigString() (string, error) {
 		if _, err := fmt.Fprintf(tw, "[+] Delay:\t%s\n", v.globalopts.Delay); err != nil {
 			return "", err
 		}
+	}
+
+	if err := libgobuster.WriteRateLimitConfig(tw, o.RateLimit); err != nil {
+		return "", err
 	}
 
 	wordlist := "stdin (pipe)"

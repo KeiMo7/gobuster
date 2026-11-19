@@ -30,6 +30,9 @@ type Gobuster struct {
 	Logger   *Logger
 	plugin   GobusterPlugin
 	Progress *Progress
+
+	abortOnce sync.Once
+	abortChan chan struct{}
 }
 
 type Guess struct {
@@ -50,8 +53,26 @@ func NewGobuster(opts *Options, plugin GobusterPlugin, logger *Logger) (*Gobuste
 	g.plugin = plugin
 	g.Logger = logger
 	g.Progress = NewProgress()
+	g.abortChan = make(chan struct{})
 
 	return &g, nil
+}
+
+// RateLimiter returns the rate limiter of the plugin, or nil when the plugin
+// does not pace requests or rate limiting is disabled.
+func (g *Gobuster) RateLimiter() *RateLimiter {
+	provider, ok := g.plugin.(RateLimiterProvider)
+	if !ok {
+		return nil
+	}
+	return provider.RateLimiter()
+}
+
+// abort stops the main loop. Only the first call has an effect.
+func (g *Gobuster) abort() {
+	g.abortOnce.Do(func() {
+		close(g.abortChan)
+	})
 }
 
 func (g *Gobuster) worker(ctx context.Context, guessChan <-chan *Guess, successChan chan<- *Guess, wg *sync.WaitGroup) {
@@ -70,7 +91,10 @@ func (g *Gobuster) worker(ctx context.Context, guessChan <-chan *Guess, successC
 
 			// Mode-specific processing
 			res, err := g.plugin.ProcessWord(ctx, guess.word, g.Progress)
-			if err != nil {
+			switch {
+			case errors.Is(err, ErrRateLimitExhausted):
+				g.handleRateLimitExhausted()
+			case err != nil:
 				// do not exit and continue
 				g.Progress.ErrorChan <- fmt.Errorf("error on word %s: %w", guess.word, err)
 			}
@@ -93,6 +117,32 @@ func (g *Gobuster) worker(ctx context.Context, guessChan <-chan *Guess, successC
 			case <-time.After(g.Opts.Delay):
 			}
 		}
+	}
+}
+
+// handleRateLimitExhausted stops the run once every known target kept rate
+// limiting. Targets that are still healthy keep their workers going.
+func (g *Gobuster) handleRateLimitExhausted() {
+	limiter := g.RateLimiter()
+	if limiter != nil && !limiter.AllExhausted() {
+		return
+	}
+	if limiter != nil {
+		for _, st := range limiter.Status() {
+			if st.Exhausted {
+				g.warnOnce("target %s kept rate limiting at %.2f req/s after %d consecutive signals, enumeration stopped", st.TargetID, st.Rate, st.ConsecutiveLimits)
+				break
+			}
+		}
+	}
+	g.abort()
+}
+
+// warnOnce emits a warning through the message channel without blocking.
+func (g *Gobuster) warnOnce(format string, args ...any) {
+	select {
+	case g.Progress.MessageChan <- Message{Level: LevelWarn, Message: fmt.Sprintf(format, args...)}:
+	default:
 	}
 }
 
@@ -228,7 +278,12 @@ func (g *Gobuster) Run(ctx context.Context) error {
 	defer close(g.Progress.ErrorChan)
 	defer close(g.Progress.MessageChan)
 
+	if limiter := g.RateLimiter(); limiter != nil {
+		limiter.SetQuiet(g.Opts.Quiet)
+	}
+
 	if err := g.plugin.PreRun(ctx, g.Progress); err != nil {
+		g.finishRateLimitHistory()
 		return err
 	}
 
@@ -279,6 +334,8 @@ ListenForMore:
 		select {
 		case <-ctx.Done():
 			break ListenForMore
+		case <-g.abortChan:
+			break ListenForMore
 		case successGuess := <-successChan:
 			// Add more guesses based on the results of previous attempts
 			if successGuess.discoverOnSuccess {
@@ -317,10 +374,24 @@ ListenForMore:
 	workerGroup.Wait()
 
 	if err := wordlist.scanner.Err(); err != nil {
+		g.finishRateLimitHistory()
 		return err
 	}
 
+	g.finishRateLimitHistory()
 	return nil
+}
+
+// finishRateLimitHistory persists the observed rate state transitions. A
+// failure here is reported but never affects the enumeration itself.
+func (g *Gobuster) finishRateLimitHistory() {
+	limiter := g.RateLimiter()
+	if limiter == nil {
+		return
+	}
+	if err := limiter.FlushHistory(); err != nil {
+		g.warnOnce("could not persist rate limit history: %v", err)
+	}
 }
 
 // GetConfigString returns the current config as a printable string

@@ -103,6 +103,13 @@ func printProgress(g *libgobuster.Gobuster) {
 		percent = 0.0
 	}
 	s := fmt.Sprintf("%sProgress: %d / %d (%3.2f%%)", TerminalClearLine, requestsIssued, requestsExpected, percent)
+	if limiter := g.RateLimiter(); limiter != nil {
+		if rate, limited := limiter.LimitedRate(); limited {
+			s += fmt.Sprintf(" [rate-limited, %.2f req/s]", rate)
+		} else if limiter.Degraded() {
+			s += " [rate control degraded]"
+		}
+	}
 	_, _ = fmt.Fprint(os.Stderr, s)
 }
 
@@ -132,6 +139,29 @@ func writeToFile(f *os.File, output string) error {
 		return fmt.Errorf("[!] Unable to write to file %w", err)
 	}
 	return nil
+}
+
+// printRateLimitSummary reports how the request rate evolved per target. It
+// only emits something when the limiter actually changed a rate and never
+// reveals the target address or response header values.
+func printRateLimitSummary(g *libgobuster.Gobuster, opts *libgobuster.Options) {
+	if opts.Quiet {
+		return
+	}
+	limiter := g.RateLimiter()
+	if limiter == nil || len(limiter.History()) == 0 {
+		return
+	}
+	for _, st := range limiter.Status() {
+		switch {
+		case st.Exhausted:
+			g.Logger.Warnf("%s: stopped after continuous rate limiting (final rate %.2f req/s)", st.TargetID, st.Rate)
+		case st.Limited:
+			g.Logger.Warnf("%s: still rate limited at the end of the run (final rate %.2f req/s)", st.TargetID, st.Rate)
+		default:
+			g.Logger.Infof("%s: recovered to %.2f req/s after rate limiting", st.TargetID, st.Rate)
+		}
+	}
 }
 
 // Gobuster is the main entry point for the CLI
@@ -212,6 +242,8 @@ func Gobuster(ctx context.Context, opts *libgobuster.Options, plugin libgobuster
 	if err != nil {
 		return err
 	}
+
+	printRateLimitSummary(gobuster, opts)
 
 	if !opts.Quiet {
 		log.Println(ruler)

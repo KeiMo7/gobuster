@@ -50,6 +50,7 @@ func New(globalopts *libgobuster.Options, opts *OptionsGCS, logger *libgobuster.
 		RetryOnTimeout:  opts.RetryOnTimeout,
 		RetryAttempts:   opts.RetryAttempts,
 		TLSCertificate:  opts.TLSCertificate,
+		RateLimit:       opts.RateLimit,
 	}
 
 	httpOpts := libgobuster.HTTPOptions{
@@ -72,6 +73,11 @@ func New(globalopts *libgobuster.Options, opts *OptionsGCS, logger *libgobuster.
 // Name should return the name of the plugin
 func (s *GobusterGCS) Name() string {
 	return "GCS bucket enumeration"
+}
+
+// RateLimiter returns the rate limiter used for the requests of this plugin.
+func (s *GobusterGCS) RateLimiter() *libgobuster.RateLimiter {
+	return s.http.RateLimiter()
 }
 
 // PreRun is the pre run implementation of GobusterS3
@@ -124,6 +130,8 @@ func (s *GobusterGCS) ProcessWord(ctx context.Context, word string, progress *li
 				continue
 			default:
 				switch {
+				case errors.Is(err, libgobuster.ErrRateLimitExhausted):
+					return nil, libgobuster.ErrRateLimitExhausted
 				case errors.Is(err, io.EOF):
 					return nil, libgobuster.ErrEOF
 				case os.IsTimeout(err):
@@ -240,6 +248,10 @@ func (s *GobusterGCS) GetConfigString() (string, error) {
 		if _, err := fmt.Fprintf(tw, "[+] Delay:\t%s\n", s.globalopts.Delay); err != nil {
 			return "", err
 		}
+	}
+
+	if err := libgobuster.WriteRateLimitConfig(tw, o.RateLimit); err != nil {
+		return "", err
 	}
 
 	wordlist := "stdin (pipe)"

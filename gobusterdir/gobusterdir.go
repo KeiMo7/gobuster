@@ -75,6 +75,7 @@ func New(globalopts *libgobuster.Options, opts *OptionsDir, logger *libgobuster.
 		TLSCertificate:   opts.TLSCertificate,
 		TLSRenegotiation: opts.TLSRenegotiation,
 		LocalAddr:        opts.LocalAddr,
+		RateLimit:        opts.RateLimit,
 	}
 
 	httpOpts := libgobuster.HTTPOptions{
@@ -102,6 +103,11 @@ func (d *GobusterDir) Name() string {
 	return "directory enumeration"
 }
 
+// RateLimiter returns the rate limiter used for the requests of this plugin.
+func (d *GobusterDir) RateLimiter() *libgobuster.RateLimiter {
+	return d.http.RateLimiter()
+}
+
 // PreRun is the pre run implementation of gobusterdir
 func (d *GobusterDir) PreRun(ctx context.Context, pr *libgobuster.Progress) error {
 	// add trailing slash
@@ -113,6 +119,8 @@ func (d *GobusterDir) PreRun(ctx context.Context, pr *libgobuster.Progress) erro
 	if err != nil {
 		var retErr error
 		switch {
+		case errors.Is(err, libgobuster.ErrRateLimitExhausted):
+			retErr = err
 		case errors.Is(err, io.EOF):
 			retErr = libgobuster.ErrEOF
 		case os.IsTimeout(err):
@@ -143,6 +151,8 @@ func (d *GobusterDir) PreRun(ctx context.Context, pr *libgobuster.Progress) erro
 	if err != nil {
 		var retErr error
 		switch {
+		case errors.Is(err, libgobuster.ErrRateLimitExhausted):
+			retErr = err
 		case errors.Is(err, io.EOF):
 			retErr = libgobuster.ErrEOF
 		case os.IsTimeout(err):
@@ -344,6 +354,10 @@ func (d *GobusterDir) GetConfigString() (string, error) {
 		if _, err := fmt.Fprintf(tw, "[+] Delay:\t%s\n", d.globalopts.Delay); err != nil {
 			return "", err
 		}
+	}
+
+	if err := libgobuster.WriteRateLimitConfig(tw, o.RateLimit); err != nil {
+		return "", err
 	}
 
 	wordlist := "stdin (pipe)"

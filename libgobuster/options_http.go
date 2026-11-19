@@ -18,6 +18,7 @@ type BasicHTTPOptions struct {
 	TLSCertificate   *tls.Certificate
 	TLSRenegotiation bool
 	LocalAddr        *net.TCPAddr
+	RateLimit        RateLimitConfig
 }
 
 // HTTPOptions is the struct to pass in all http options to Gobuster

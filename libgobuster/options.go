@@ -19,4 +19,6 @@ type Options struct {
 	NoError             bool
 	Quiet               bool
 	Delay               time.Duration
+	// RateLimit controls adaptive request pacing and the manual rate override.
+	RateLimit RateLimitConfig
 }

@@ -13,6 +13,13 @@ import (
 	"strings"
 )
 
+// maxRateLimitRetries is a safety net that bounds how often a single request
+// is re-issued after the target signalled a rate limit. The rate limiter
+// normally stops the target long before this (see MaxConsecutiveLimits); this
+// only prevents a single request from looping forever when stopping the target
+// is disabled.
+const maxRateLimitRetries = 100
+
 // HTTPHeader holds a single key value pair of a HTTP header
 type HTTPHeader struct {
 	Name  string
@@ -32,6 +39,7 @@ type HTTPClient struct {
 	method                string
 	host                  string
 	logger                *Logger
+	rateLimiter           *RateLimiter
 }
 
 // RequestOptions is used to pass options to a single individual request
@@ -125,12 +133,47 @@ func NewHTTPClient(opt *HTTPOptions, logger *Logger) (*HTTPClient, error) {
 		}
 	}
 	client.logger = logger
+	client.rateLimiter = NewRateLimiter(opt.RateLimit, logger)
 	return &client, nil
+}
+
+// RateLimiter returns the rate limiter of this client. It is nil when adaptive
+// rate limiting and manual rates are both disabled.
+func (client *HTTPClient) RateLimiter() *RateLimiter {
+	return client.rateLimiter
 }
 
 // Request makes a http request and returns the status, the content length, the headers, the body and an error
 // if you want the body returned set the corresponding property inside RequestOptions
 func (client *HTTPClient) Request(ctx context.Context, fullURL url.URL, opts RequestOptions) (int, int64, http.Header, []byte, error) {
+	target := TargetKey(&fullURL, opts.Host)
+
+	for attempt := 0; ; attempt++ {
+		if err := client.rateLimiter.Acquire(ctx, target); err != nil {
+			return 0, 0, nil, nil, err
+		}
+
+		statusCode, length, header, body, err := client.doRequest(ctx, fullURL, opts)
+		if err != nil {
+			return statusCode, length, header, body, err
+		}
+
+		limited, discard, observeErr := client.rateLimiter.Observe(target, statusCode, header)
+		if observeErr != nil {
+			return 0, 0, nil, nil, observeErr
+		}
+		if !discard {
+			return statusCode, length, header, body, nil
+		}
+		if limited && attempt >= maxRateLimitRetries {
+			return 0, 0, nil, nil, ErrRateLimited
+		}
+		// The response is a rate limit signal, not an enumeration result. The
+		// next Acquire waits for the cooldown set by the limiter.
+	}
+}
+
+func (client *HTTPClient) doRequest(ctx context.Context, fullURL url.URL, opts RequestOptions) (int, int64, http.Header, []byte, error) {
 	resp, err := client.makeRequest(ctx, fullURL, opts)
 	if err != nil {
 		// ignore context canceled errors

@@ -108,6 +108,8 @@ func run(c *cli.Context) error {
 
 	log := libgobuster.NewLogger(globalOpts.Debug)
 
+	pluginOpts.RateLimit = globalOpts.RateLimit
+
 	plugin, err := gobusterdir.New(&globalOpts, pluginOpts, log)
 	if err != nil {
 		return fmt.Errorf("error on creating gobusterdir: %w", err)

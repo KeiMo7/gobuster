@@ -17,3 +17,9 @@ type GobusterPlugin interface {
 type Result interface {
 	ResultToString() (string, error)
 }
+
+// RateLimiterProvider is implemented by plugins that pace their requests. The
+// returned limiter may be nil when rate limiting is disabled.
+type RateLimiterProvider interface {
+	RateLimiter() *RateLimiter
+}
