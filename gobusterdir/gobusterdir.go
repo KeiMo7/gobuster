@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"syscall"
@@ -48,6 +49,7 @@ type GobusterDir struct {
 	options    *OptionsDir
 	globalopts *libgobuster.Options
 	http       *libgobuster.HTTPClient
+	rootURL    *url.URL
 }
 
 // New creates a new initialized GobusterDir
@@ -63,6 +65,21 @@ func New(globalopts *libgobuster.Options, opts *OptionsDir, logger *libgobuster.
 	g := GobusterDir{
 		options:    opts,
 		globalopts: globalopts,
+	}
+
+	if opts.URL != nil {
+		rootURL := *opts.URL
+		if !strings.HasSuffix(rootURL.Path, "/") {
+			rootURL.Path = fmt.Sprintf("%s/", rootURL.Path)
+		}
+		g.rootURL = &rootURL
+	}
+
+	if err := globalopts.ValidateRecursionLimits(); err != nil {
+		return nil, err
+	}
+	if err := opts.ValidateRecursion(); err != nil {
+		return nil, err
 	}
 
 	basicOptions := libgobuster.BasicHTTPOptions{
@@ -100,6 +117,39 @@ func New(globalopts *libgobuster.Options, opts *OptionsDir, logger *libgobuster.
 // Name should return the name of the plugin
 func (d *GobusterDir) Name() string {
 	return "directory enumeration"
+}
+
+// RootTarget returns the initial base URL, always with a trailing slash.
+func (d *GobusterDir) RootTarget() string {
+	if d.rootURL == nil {
+		return ""
+	}
+	return d.rootURL.String()
+}
+
+// SetTarget changes the base URL between recursive scans. The scheduler calls
+// this only after all workers for the previous target have stopped.
+func (d *GobusterDir) SetTarget(target string) error {
+	u, err := url.Parse(target)
+	if err != nil {
+		return err
+	}
+	if d.rootURL == nil {
+		return errors.New("initial URL is not set")
+	}
+	if !strings.EqualFold(u.Scheme, d.rootURL.Scheme) || !strings.EqualFold(u.Host, d.rootURL.Host) {
+		return errors.New("recursive target must have the same scheme and host as the initial URL")
+	}
+
+	u.RawQuery = ""
+	u.Fragment = ""
+	if !strings.HasSuffix(u.Path, "/") {
+		u.Path = fmt.Sprintf("%s/", u.Path)
+	}
+	// Recursive layers only carry directories. The layer's depth is tracked by
+	// the scheduler, so the path length is never used to infer it.
+	d.options.URL = u
+	return nil
 }
 
 // PreRun is the pre run implementation of gobusterdir
@@ -297,7 +347,14 @@ func (d *GobusterDir) ProcessWord(ctx context.Context, word string, progress *li
 		}
 
 		if resultStatus && !d.options.ExcludeLengthParsed.Contains(int(size)) {
-			path := fmt.Sprintf("%-20s", entity)
+			displayPath := entity
+			if d.globalopts.Recursion {
+				// Inside a recursive run the layer's base path matters, so
+				// report the full path instead of only the word.
+				displayPath = url.Path
+			}
+
+			path := fmt.Sprintf("%-20s", displayPath)
 			if d.options.Expanded {
 				// expanded mode should show the full url
 				path = url.String()
@@ -315,6 +372,17 @@ func (d *GobusterDir) ProcessWord(ctx context.Context, word string, progress *li
 			if !d.options.HideLength {
 				r.Size = size
 			}
+
+			if d.globalopts.Recursion {
+				report, expand := d.recursionOutputDecision(entity, url.Path)
+				if !report {
+					r.SetSuppressResult(true)
+				}
+				if expand && !d.options.excludedFromRecursion(statusCode, size) {
+					r.SetRecursiveTarget(d.recursiveTargetFor(entity, url, statusCode, header))
+				}
+			}
+
 			return r, nil
 		}
 	}
@@ -427,6 +495,32 @@ func (d *GobusterDir) GetConfigString() (string, error) {
 	if o.UseSlash {
 		if _, err := fmt.Fprintf(tw, "[+] Add Slash:\ttrue\n"); err != nil {
 			return "", err
+		}
+	}
+
+	if d.globalopts.Recursion {
+		if _, err := fmt.Fprintf(tw, "[+] Recursion:\ttrue (depth %d, max targets %d)\n", d.globalopts.RecursionDepth, d.globalopts.RecursionMaxTargets); err != nil {
+			return "", err
+		}
+		if len(o.RecursionExcludePaths) > 0 {
+			if _, err := fmt.Fprintf(tw, "[+] Recursion Exclude Paths:\t%s\n", strings.Join(o.RecursionExcludePaths, ",")); err != nil {
+				return "", err
+			}
+		}
+		if o.RecursionExcludeStatusP.Length() > 0 {
+			if _, err := fmt.Fprintf(tw, "[+] Recursion Exclude Status:\t%s\n", o.RecursionExcludeStatusP.Stringify()); err != nil {
+				return "", err
+			}
+		}
+		if o.RecursionExcludeLenP.Length() > 0 {
+			if _, err := fmt.Fprintf(tw, "[+] Recursion Exclude Length:\t%s\n", o.RecursionExcludeLenP.Stringify()); err != nil {
+				return "", err
+			}
+		}
+		if len(o.RecursionExpandOnly) > 0 {
+			if _, err := fmt.Fprintf(tw, "[+] Recursion Expand Only Paths:\t%s\n", strings.Join(o.RecursionExpandOnly, ",")); err != nil {
+				return "", err
+			}
 		}
 	}
 

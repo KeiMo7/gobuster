@@ -131,6 +131,54 @@ gobuster dir -u https://example.com -w wordlist.txt -l
 gobuster dir -u https://example.com -w wordlist.txt -s 200,301,302
 ```
 
+**Recursive directory enumeration:**
+
+```bash
+# Expand every discovered directory, up to depth 3 (the default)
+gobuster dir -u https://example.com -w wordlist.txt --recursive
+
+# Limit the depth explicitly. The initial URL is level 0, so depth 2 scans
+# /admin (level 1) and /admin/users (level 2), and only reports anything deeper.
+gobuster dir -u https://example.com -w wordlist.txt --recursive --recursion-depth 2
+
+# Never expand the admin area, and expand (but do not print) every "api" hit
+gobuster dir -u https://example.com -w wordlist.txt --recursive \
+  --recursion-exclude-path admin \
+  --recursion-expand-only-path 'api/*'
+
+# Do not expand hits answered with 200 or with a 1234-byte body
+gobuster dir -u https://example.com -w wordlist.txt --recursive \
+  --recursion-exclude-status 200 --recursion-exclude-length 1234
+```
+
+Recursion has the following semantics:
+
+- Each discovered directory is scanned with the same wordlist. The initial URL
+  is depth 0; `--recursion-depth n` expands down to level n and reports deeper
+  hits without expanding them. `--recursion-depth 0` disables expansion.
+- Only directories are expanded. A path whose final segment contains an
+  extension (for example `index.php`) is treated as a file, so file layers never
+  become base directories.
+- A directory reached through several spellings (case differences, repeated
+  slashes, with or without a trailing slash) is expanded exactly once.
+- A redirect to a directory is followed as an expansion candidate, but only on
+  the original scheme and host; redirects to other hosts are ignored.
+- `--recursion-exclude-path` still reports the hit under the normal filters but
+  never expands it. `--recursion-expand-only-path` expands it without printing
+  it. Path patterns are either prefixes (`admin`) or globs (`api/*`).
+- `--recursion-exclude-status` and `--recursion-exclude-length` use the same
+  syntax as `--status-codes` and `--exclude-length`.
+- The visited-directory record is bounded by `--recursion-max-targets`
+  (default 1024, `0` for unlimited). When the limit is reached no further
+  directories are expanded, the results collected so far are output, and a
+  warning reports the truncation.
+- Recursion reuses `--threads` and `--delay` per layer; it does not raise
+  concurrency. Every new base URL runs the same wildcard precheck as the
+  initial one.
+- Recursion requires a wordlist file. Reading the wordlist from stdin is
+  rejected at startup, because the wordlist has to be replayed for every
+  discovered directory.
+
 #### 🔍 DNS Mode (`dns`)
 
 Discover subdomains through DNS resolution.

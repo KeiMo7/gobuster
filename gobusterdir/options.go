@@ -22,6 +22,16 @@ type OptionsDir struct {
 	ExcludeLength              string
 	ExcludeLengthParsed        libgobuster.Set[int]
 	Force                      bool
+
+	// Recursion is enabled and bounded through the global options. These
+	// fields define which discovered directories may be expanded and which are
+	// excluded. All rules are evaluated before a directory is queued.
+	RecursionExcludePaths   []string
+	RecursionExcludeStatus  string
+	RecursionExcludeStatusP libgobuster.Set[int]
+	RecursionExcludeLength  string
+	RecursionExcludeLenP    libgobuster.Set[int]
+	RecursionExpandOnly     []string
 }
 
 // NewOptions returns a new initialized OptionsDir
@@ -31,5 +41,7 @@ func NewOptions() *OptionsDir {
 		StatusCodesBlacklistParsed: libgobuster.NewSet[int](),
 		ExtensionsParsed:           libgobuster.NewSet[string](),
 		ExcludeLengthParsed:        libgobuster.NewSet[int](),
+		RecursionExcludeStatusP:    libgobuster.NewSet[int](),
+		RecursionExcludeLenP:       libgobuster.NewSet[int](),
 	}
 }

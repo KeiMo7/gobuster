@@ -36,6 +36,13 @@ func getFlags() []cli.Flag {
 		&cli.BoolFlag{Name: "discover-backup", Aliases: []string{"db"}, Value: false, Usage: "Upon finding a file search for backup files by appending multiple backup extensions"},
 		&cli.StringFlag{Name: "exclude-length", Aliases: []string{"xl"}, Usage: "exclude the following content lengths (completely ignores the status). You can separate multiple lengths by comma and it also supports ranges like 203-206"},
 		&cli.BoolFlag{Name: "force", Value: false, Usage: "Continue even if the prechecks fail. Please only use this if you know what you are doing, it can lead to unexpected results."},
+		&cli.BoolFlag{Name: "recursive", Usage: "Recursively expand discovered directories with the same wordlist"},
+		&cli.IntFlag{Name: "recursion-depth", Value: 3, Usage: "Maximum directory depth to expand. The initial URL is depth 0, so 0 disables expansion"},
+		&cli.IntFlag{Name: "recursion-max-targets", Value: 1024, Usage: "Maximum number of directories kept in the visited record (0 for unlimited). Expanding stops and a warning is printed when the limit is reached"},
+		&cli.StringSliceFlag{Name: "recursion-exclude-path", Usage: "Path (prefix or glob) whose hits are reported but never expanded during recursion. Can be repeated"},
+		&cli.StringFlag{Name: "recursion-exclude-status", Usage: "Status codes that disqualify a hit from recursive expansion. Same syntax as status-codes"},
+		&cli.StringFlag{Name: "recursion-exclude-length", Usage: "Response lengths that disqualify a hit from recursive expansion. Same syntax as exclude-length"},
+		&cli.StringSliceFlag{Name: "recursion-expand-only-path", Usage: "Path (prefix or glob) that is expanded but not reported during recursion. Can be repeated"},
 	}...)
 	return flags
 }
@@ -104,6 +111,40 @@ func run(c *cli.Context) error {
 	globalOpts, err := internalcli.ParseGlobalOptions(c)
 	if err != nil {
 		return err
+	}
+
+	globalOpts.Recursion = c.Bool("recursive")
+	globalOpts.RecursionDepth = c.Int("recursion-depth")
+	globalOpts.RecursionMaxTargets = c.Int("recursion-max-targets")
+
+	pluginOpts.RecursionExcludePaths = c.StringSlice("recursion-exclude-path")
+	pluginOpts.RecursionExpandOnly = c.StringSlice("recursion-expand-only-path")
+
+	pluginOpts.RecursionExcludeStatus = c.String("recursion-exclude-status")
+	ret5, err := libgobuster.ParseCommaSeparatedInt(pluginOpts.RecursionExcludeStatus)
+	if err != nil {
+		return fmt.Errorf("invalid value for recursion-exclude-status: %w", err)
+	}
+	pluginOpts.RecursionExcludeStatusP = ret5
+
+	pluginOpts.RecursionExcludeLength = c.String("recursion-exclude-length")
+	ret6, err := libgobuster.ParseCommaSeparatedInt(pluginOpts.RecursionExcludeLength)
+	if err != nil {
+		return fmt.Errorf("invalid value for recursion-exclude-length: %w", err)
+	}
+	pluginOpts.RecursionExcludeLenP = ret6
+
+	if globalOpts.Recursion && globalOpts.Wordlist == "-" {
+		return errors.New("recursive mode is not supported when the wordlist is read from stdin, please use a wordlist file")
+	}
+
+	if !globalOpts.Recursion {
+		// Recursion-only filters would silently do nothing, so reject them
+		// instead of pretending they applied.
+		if len(pluginOpts.RecursionExcludePaths) > 0 || len(pluginOpts.RecursionExpandOnly) > 0 ||
+			pluginOpts.RecursionExcludeStatus != "" || pluginOpts.RecursionExcludeLength != "" {
+			return errors.New("recursion exclude options require --recursive to be set")
+		}
 	}
 
 	log := libgobuster.NewLogger(globalOpts.Debug)

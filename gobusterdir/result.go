@@ -23,6 +23,34 @@ type Result struct {
 	Header     http.Header
 	StatusCode int
 	Size       int64
+
+	// recursionTarget is the directory URL to expand, empty for files.
+	recursionTarget string
+	// suppressResult hides this hit from the normal output while still
+	// allowing it to seed a recursive scan.
+	suppressResult bool
+}
+
+// RecursiveTarget returns the next URL to scan, or an empty string when this
+// result represents a file rather than a directory candidate.
+func (r Result) RecursiveTarget() string {
+	return r.recursionTarget
+}
+
+// SetRecursiveTarget records the directory URL to expand.
+func (r *Result) SetRecursiveTarget(target string) {
+	r.recursionTarget = target
+}
+
+// SuppressResult reports whether this result should not be written to the
+// normal result output.
+func (r Result) SuppressResult() bool {
+	return r.suppressResult
+}
+
+// SetSuppressResult hides or shows this result in the normal output.
+func (r *Result) SetSuppressResult(suppress bool) {
+	r.suppressResult = suppress
 }
 
 // ResultToString converts the Result to its textual representation
